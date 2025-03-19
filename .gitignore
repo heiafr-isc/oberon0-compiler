@@ -1,0 +1,10 @@
+# SPDX-FileCopyrightText: 2025 Jacques Supcik <jacques.supcik@hefr.ch>
+#
+# SPDX-License-Identifier: Apache-2.0 OR MIT
+
+/.venv
+/.ruff_cache
+/dist
+/test/*/site
+__pycache__
+*.wasm

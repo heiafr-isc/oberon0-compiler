@@ -1,0 +1,33 @@
+ident = letter {letter | digit}.
+integer = digit {digit}.
+selector = {"[" expression "]"}.
+number = integer.
+factor = ident (ActualParameters  | selector) | number | "(" expression ")" | "~" factor.
+term = factor {("*" | "DIV" | "MOD" | "&") factor}.
+SimpleExpression = ["+"|"-"] term {("+"|"-" | "OR") term}.
+expression = SimpleExpression
+    [("=" | "#" | "<" | "<=" | ">" | ">=") SimpleExpression].
+assignment = ident selector ":=" expression.
+ActualParameters = "(" [expression {"," expression}] ")" .
+ProcedureCall = ident selector [ActualParameters].
+IfStatement = "IF" expression "THEN" StatementSequence
+    {"ELSIF" expression "THEN" StatementSequence}
+    ["ELSE" StatementSequence] "END".
+WhileStatement = "WHILE" expression "DO" StatementSequence "END".
+RepeatStatement = "REPEAT" StatementSequence "UNTIL" expression.
+statement = [assignment | ProcedureCall | IfStatement | WhileStatement | RepeatStatement].
+StatementSequence = statement {";" statement}.
+IdentList = ident {"," ident}.
+ArrayType = "ARRAY" expression "OF" type.
+type = ident | ArrayType.
+FPSection = ["VAR"] IdentList ":" type.
+FormalParameters = "(" [FPSection {";" FPSection}] ")".
+ProcedureHeading = "PROCEDURE" ident [FormalParameters].
+ProcedureBody = declarations ["BEGIN" StatementSequence] "END" ident.
+ProcedureDeclaration = ProcedureHeading ";" ProcedureBody.
+declarations = ["CONST" {ident "=" expression ";"}]
+    ["TYPE" {ident "=" type ";"}]
+    ["VAR" {IdentList ":" type ";"}]
+    {ProcedureDeclaration ";"}.
+module = "MODULE" ident ";" declarations
+    ["BEGIN" StatementSequence] "END" ident "." .

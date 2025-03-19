@@ -1,0 +1,39 @@
+# SPDX-FileCopyrightText: 2025 Jacques Supcik <jacques.supcik@hefr.ch>
+#
+# SPDX-License-Identifier: Apache-2.0 OR MIT
+#
+[project]
+name = "oberon0-compiler"
+version = "0.1.0"
+description = ""
+authors = [{ name = "Jacques Supcik", email = "jacques.supcik@hefr.ch" }]
+license = { text = "Apache-2.0 OR MIT" }
+readme = "README.md"
+requires-python = ">=3.12,<4.0"
+dependencies = [
+    "pydantic (>=2.10.6,<3.0.0)",
+    "click (>=8.1.8,<9.0.0)",
+    "wasm-gen @ git+https://github.com/heiafr-isc/wasm-gen-py.git",
+    "pydantic-core (>=2.29.0,<3.0.0)",
+    "devtools (>=0.12.2,<0.13.0)",
+    "loguru (>=0.7.3,<0.8.0)",
+    "rich (>=13.9.4,<14.0.0)"
+]
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.group.dev.dependencies]
+black = "^25.1.0"
+ruff = "^0.9.6"
+pydantic-2-mermaid = "^0.7.3"
+
+[tool.poetry.group.test.dependencies]
+pytest = "^8.3.4"
+
+[project.scripts]
+oberon0-compiler = 'oberon0_compiler:app'
+
+[tool.ruff.lint]
+select = ["E", "F", "B", "Q", "N", "I", "UP", "PL", "RUF", "C90"]
