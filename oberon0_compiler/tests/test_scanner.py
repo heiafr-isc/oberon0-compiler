@@ -9,23 +9,25 @@ from oberon0_compiler.token import Token
 
 
 def test_assignment():
-    src = "VAR i := 0;"
+    src = "VAR i := 12;"
     scanner = Scanner()
     scanner.open(io.StringIO(src))
     scanner.get_next_symbol()
     assert scanner.sym == Token.VAR
     scanner.get_next_symbol()
     assert scanner.sym == Token.IDENT
+    assert scanner.value == "i"
     scanner.get_next_symbol()
     assert scanner.sym == Token.BECOMES
     scanner.get_next_symbol()
     assert scanner.sym == Token.NUMBER
+    assert scanner.value == "12"
     scanner.get_next_symbol()
     assert scanner.sym == Token.SEMICOLON
 
 
 def test_compare_leq():
-    src = "i <= 0"
+    src = "i <= -5"
     scanner = Scanner()
     scanner.open(io.StringIO(src))
     scanner.get_next_symbol()
@@ -35,8 +37,10 @@ def test_compare_leq():
     assert scanner.sym == Token.LEQ
     assert scanner.value == "<="
     scanner.get_next_symbol()
+    assert scanner.sym == Token.MINUS
+    scanner.get_next_symbol()
     assert scanner.sym == Token.NUMBER
-    assert scanner.value == 0
+    assert scanner.value == "5"
 
 
 def test_compare_less():
@@ -51,4 +55,4 @@ def test_compare_less():
     assert scanner.value == "<"
     scanner.get_next_symbol()
     assert scanner.sym == Token.NUMBER
-    assert scanner.value == 0
+    assert scanner.value == "0"
