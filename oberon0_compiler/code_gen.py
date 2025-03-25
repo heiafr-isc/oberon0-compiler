@@ -7,271 +7,404 @@ Oberon-2 WASM Code Generator
 """
 
 
+from typing import ClassVar
+
 import wasm_gen as W  # noqa
 from loguru import logger
 from pydantic import BaseModel
+from rich.console import Console
 from wasm_gen import instructions as I  # noqa
 from wasm_gen.type import i32_t
 
 from oberon0_compiler import ast, sym_table
+from oberon0_compiler.ast import Node
+from oberon0_compiler.sym_table import SymbolTable
+
+console = Console()
 
 
-class Context(BaseModel):
-    current_function: W.Function = None
-    symbol_table: sym_table.SymbolTable = sym_table.SymbolTable()
+class CodeGenError(Exception):
+    def __init__(self, message, file_name, line_no, col_no):
+        super().__init__(message)
+        self.file_name = file_name
+        self.line_no = line_no
+        self.col_no = col_no
 
 
-class CodeGenerator:
-    def __init__(self, ast):
-        self.ast = ast
-        self.code = None
-        self.sp: W.Global = None
-        self.context = Context()
+class CodeGenerator(BaseModel):
+    ast: Node = ast
+    code: W.Module = None
+
+    _sp: W.Global = None
+    _current_function: list[W.Function] = []
+    _symbol_table: ClassVar[SymbolTable] = SymbolTable()
+
+    def check(self, condition, message):
+        if not condition:
+            logger.error(self._symbol_table)
+            raise CodeGenError(
+                message,
+                self.ast.file_name,
+                self.ast.line_no,
+                self.ast.col_no,
+            )
+
+    def current_function(self):
+        assert len(self._current_function) > 0
+        return self._current_function[-1]
 
     def add_syscalls(self):
         logger.debug("Adding system calls")
-        open_input = W.BaseFunction(type=W.FunctionType(params=[], results=[]))
-        read_int = W.BaseFunction(type=W.FunctionType(params=[i32_t], results=[]))
-        eot = W.BaseFunction(type=W.FunctionType(params=[], results=[i32_t]))
-        write_char = W.BaseFunction(type=W.FunctionType(params=[i32_t], results=[]))
-        write_int = W.BaseFunction(
-            type=W.FunctionType(params=[i32_t, i32_t], results=[])
-        )
-        write_ln = W.BaseFunction(type=W.FunctionType(params=[], results=[]))
 
-        self.code.imports.extend(
-            [
-                W.Import(node=open_input, module="sys", name="OpenInput"),
-                W.Import(node=read_int, module="sys", name="ReadInt"),
-                W.Import(node=eot, module="sys", name="eot"),
-                W.Import(node=write_char, module="sys", name="WriteChar"),
-                W.Import(node=write_int, module="sys", name="WriteInt"),
-                W.Import(node=write_ln, module="sys", name="WriteLn"),
-            ]
+        integer: sym_table.Type = self._symbol_table.find(
+            "INTEGER", class_=sym_table.Type, max_level=1
         )
 
-        self.context.symbol_table.add(
-            sym_table.SystemCall(
-                name="OpenInput",
-                arguments=[],
-                return_type=None,
-                syscall=open_input,
-            )
-        )
+        assert integer is not None
+        logger.debug(f"INTEGER: {integer}")
 
-        self.context.symbol_table.add(
-            sym_table.SystemCall(
-                name="ReadInt",
-                arguments=[sym_table.Argument(type=ast.IntegerType(), byref=True)],
-                return_type=None,
-                syscall=read_int,
-            )
-        )
-
-        self.context.symbol_table.add(
-            sym_table.SystemCall(
-                name="eot",
-                arguments=[],
-                return_type=ast.IntegerType(),
-                syscall=eot,
-            )
-        )
-
-        self.context.symbol_table.add(
-            sym_table.SystemCall(
-                name="WriteChar",
-                arguments=[sym_table.Argument(type=ast.IntegerType(), byref=False)],
-                return_type=None,
-                syscall=write_char,
-            )
-        )
-
-        self.context.symbol_table.add(
-            sym_table.SystemCall(
-                name="WriteInt",
-                arguments=[
-                    sym_table.Argument(type=ast.IntegerType(), byref=False),
-                    sym_table.Argument(type=ast.IntegerType(), byref=False),
+        syscalls = [
+            (
+                "OpenInput",
+                W.BaseFunction(type=W.FunctionType(params=[], results=[])),
+                [],
+                None,
+            ),
+            (
+                "ReadInt",
+                W.BaseFunction(type=W.FunctionType(params=[i32_t], results=[])),
+                [sym_table.Argument(type=integer, byref=True)],
+                None,
+            ),
+            (
+                "eot",
+                W.BaseFunction(type=W.FunctionType(params=[], results=[i32_t])),
+                [],
+                integer,
+            ),
+            (
+                "WriteChar",
+                W.BaseFunction(type=W.FunctionType(params=[i32_t], results=[])),
+                [sym_table.Argument(type=integer, byref=False)],
+                None,
+            ),
+            (
+                "WriteInt",
+                W.BaseFunction(type=W.FunctionType(params=[i32_t, i32_t], results=[])),
+                [
+                    sym_table.Argument(type=integer, byref=False),
+                    sym_table.Argument(type=integer, byref=False),
                 ],
-                return_type=None,
-                syscall=write_int,
-            )
-        )
+                None,
+            ),
+            (
+                "WriteLn",
+                W.BaseFunction(type=W.FunctionType(params=[], results=[])),
+                [],
+                None,
+            ),
+        ]
 
-        self.context.symbol_table.add(
-            sym_table.SystemCall(
-                name="WriteLn",
-                arguments=[],
-                return_type=None,
-                syscall=write_ln,
+        for name, f, args, ret in syscalls:
+            self.code.imports.append(W.Import(node=f, module="sys", name=name))
+            self._symbol_table.add(
+                sym_table.SystemCall(
+                    name=name, arguments=args, return_type=ret, syscall=f
+                ),
             )
-        )
 
     def add_memory(self):
         m1 = W.BaseMemory(type=W.MemoryType(min_pages=1))
         self.code.imports.append(W.Import(node=m1, module="env", name="memory"))
 
     def add_stack_pointer(self):
-        self.sp = W.BaseGlobal(type=W.GlobalType(type=i32_t, mutable=True))
+        self._sp = W.BaseGlobal(type=W.GlobalType(type=i32_t, mutable=True))
         self.code.imports.append(
-            W.Import(node=self.sp, module="env", name="__stack_pointer")
+            W.Import(node=self._sp, module="env", name="__stack_pointer")
         )
 
     def addr_of(self, expr):
-        assert isinstance(expr, ast.SimpleExpression)
-        assert expr.sign is None
-        assert isinstance(expr.term.factor, ast.SimpleFactor)
-        assert len(expr.term.mulop_factors) == 0
-        assert len(expr.addop_terms) == 0
+        self.check(isinstance(expr, ast.SimpleExpression), "Expression expected")
+        self.check(expr.sign is None, "Sign not allowed")
+        self.check(
+            isinstance(expr.term.factor, ast.SimpleFactor), "Simple factor expected"
+        )
+        self.check(len(expr.term.mulop_factors) == 0, "No mulop factors allowed")
+        self.check(len(expr.addop_terms) == 0, "No addop terms allowed")
 
-        sym = self.context.symbol_table.find(expr.term.factor.ident)
-        self.context.current_function.body.extend(
+        sym = self._symbol_table.find(expr.term.factor.ident)
+        self.check(sym is not None, f"Unknown symbol: {expr.term.factor.ident}")
+        self.current_function().body.extend(
             [
-                I.GlobalGet(global_=self.sp),
+                I.GlobalGet(global_=self._sp),
                 I.I32Const(value=sym.offset),
                 I.I32Sub(),
             ]
         )
 
-    def factor(self, f):
+    def function_call(self, f):
+        s = self._symbol_table.find(f.ident)
+        integer = self._symbol_table.find("INTEGER", class_=sym_table.Type, max_level=1)
+        self.check(s is not None, f"Unknown procedure: {f.ident}")
+        self.check(isinstance(s, sym_table.SystemCall), "Only system calls allowed")
+        self.check(s.return_type == integer, "Return type must be INTEGER")
+        self.system_call(f, s)
+
+    def factor(self, f) -> sym_table.Type:
         if isinstance(f, ast.Number):
-            self.context.current_function.body.append(I.I32Const(value=f.value))
+            logger.debug(f"Number: {f.value}")
+            self.current_function().body.append(I.I32Const(value=f.value))
+            return self._symbol_table.find(
+                "INTEGER", class_=sym_table.Type, max_level=1
+            )
         elif isinstance(f, ast.SimpleFactor):
-            sym = self.context.symbol_table.find(f.ident)
-            if sym:
-                self.context.current_function.body.extend(
-                    [
-                        I.GlobalGet(global_=self.sp),
-                        I.I32Const(value=sym.offset),
-                        I.I32Sub(),
-                        I.I32Load(),
-                    ]
-                )
+            sym = self._symbol_table.find(f.ident)
+            self.check(sym is not None, f"Unknown symbol: {f.ident}")
+            self.check(len(f.selector) == 0, "Selectors not yet implemented")
+
+            self.current_function().body.extend(
+                [
+                    I.GlobalGet(global_=self._sp),
+                    I.I32Const(value=sym.offset),
+                    I.I32Sub(),
+                    I.I32Load(),
+                ]
+            )
+            return sym.type
+
         elif isinstance(f, ast.FunctionCall):
-            raise ValueError("Function calls not yet implemented")
+            self.function_call(f)
         elif isinstance(f, ast.ExpressionFactor):
-            self.expression(f.expression)
+            return self.expression(f.expression)
         elif isinstance(f, ast.Negation):
-            self.factor(f.factor)
-            self.context.current_function.body.append(I.I32Neg())
+            fn = self.current_function()
+            t = self.factor(f.factor)
+            fn.body.append(I.I32Const(value=0))
+            fn.body.append(I.I32Eq())
+            return t
         else:
-            raise ValueError(f"Unknown factor: {f}")
+            raise Exception(f"Unknown factor: {f}")
 
-    def term(self, t):
-        self.factor(t.factor)
+    def term(self, t) -> sym_table.Type:
+        f1_type = self.factor(t.factor)
+        integer = self._symbol_table.find("INTEGER", class_=sym_table.Type, max_level=1)
+        boolean = self._symbol_table.find("BOOLEAN", class_=sym_table.Type, max_level=1)
+        fn = self.current_function()
         for op, f in t.mulop_factors:
-            self.factor(f)
+            f2_type = self.factor(f)
+            self.check(f1_type == f2_type, "Type mismatch")
             if op == "*":
-                self.context.current_function.body.append(I.I32Mul())
+                self.check(f1_type == integer, "Type mismatch : expected INTEGER")
+                fn.body.append(I.I32Mul())
             elif op == "DIV":
-                self.context.current_function.body.append(I.I32DivS())
+                self.check(f1_type == integer, "Type mismatch : expected INTEGER")
+                fn.body.append(I.I32DivS())
             elif op == "MOD":
-                self.context.current_function.body.append(I.I32RemS())
+                self.check(f1_type == integer, "Type mismatch : expected INTEGER")
+                fn.body.append(I.I32RemS())
+            elif op == "&":
+                self.check(f1_type == boolean, "Type mismatch : expected BOOLEAN")
+                fn.body.append(I.I32And())
             else:
-                raise ValueError(f"Unknown mulop: {op}")
+                raise Exception(f"Unknown mulop: {op}")
 
-    def simple_expression(self, expr):
-        self.term(expr.term)
+        return f1_type
+
+    def simple_expression(self, expr) -> sym_table.Type:
+        fn = self.current_function()
+        integer = self._symbol_table.find("INTEGER", class_=sym_table.Type, max_level=1)
+
         if expr.sign == "-":
-            self.context.current_function.body.append(I.I32Neg())
-        for op, t in expr.addop_terms:
-            self.term(t)
-            if op == "+":
-                self.context.current_function.body.append(I.I32Add())
-            elif op == "-":
-                self.context.current_function.body.append(I.I32Sub())
-            else:
-                raise ValueError(f"Unknown addop: {op}")
-
-    def expression(self, expr):
-        if isinstance(expr, ast.SimpleExpression):
-            self.simple_expression(expr)
+            fn.body.append(I.I32Const(value=0))
+            t1_type = self.term(expr.term)
+            self.check(t1_type == integer, "Type mismatch")
+            fn.body.append(I.I32Sub())
         else:
-            raise ValueError(f"Unknown expression: {expr}")
+            t1_type = self.term(expr.term)
+
+        boolean = self._symbol_table.find("BOOLEAN", class_=sym_table.Type, max_level=1)
+
+        for op, t in expr.addop_terms:
+            t2_type = self.term(t)
+            self.check(t1_type == t2_type, "Type mismatch")
+            if op == "+":
+                self.check(t1_type == integer, "Type mismatch : expected INTEGER")
+                fn.body.append(I.I32Add())
+            elif op == "-":
+                self.check(t1_type == integer, "Type mismatch : expected INTEGER")
+                fn.body.append(I.I32Sub())
+            elif op == "OR":
+                self.check(t1_type == boolean, "Type mismatch : expected BOOLEAN")
+                fn.body.append(I.I32Or())
+            else:
+                raise Exception(f"Unknown addop: {op}")
+        return t1_type
+
+    def complex_expression(self, expr) -> sym_table.Type:
+        boolean = self._symbol_table.find("BOOLEAN", class_=sym_table.Type, max_level=1)
+        integer = self._symbol_table.find("INTEGER", class_=sym_table.Type, max_level=1)
+        e1_type = self.simple_expression(expr.simple_expression)
+        if expr.relation is None:
+            return e1_type
+
+        fn = self.current_function()
+        e2_type = self.simple_expression(expr.relation[1])
+        self.check(e1_type == e2_type, "Type mismatch")
+        if expr.relation[0] == "=":
+            fn.body.append(I.I32Eq())
+        elif expr.relation[0] == "#":
+            fn.body.append(I.I32Ne())
+        elif expr.relation[0] == "<":
+            self.check(e1_type == integer, "Type mismatch : expected INTEGER")
+            fn.body.append(I.I32LtS())
+        elif expr.relation[0] == "<=":
+            self.check(e1_type == integer, "Type mismatch : expected INTEGER")
+            fn.body.append(I.I32LeS())
+        elif expr.relation[0] == ">":
+            self.check(e1_type == integer, "Type mismatch : expected INTEGER")
+            fn.body.append(I.I32GtS())
+        elif expr.relation[0] == ">=":
+            self.check(e1_type == integer, "Type mismatch : expected INTEGER")
+            fn.body.append(I.I32GeS())
+        else:
+            raise Exception(f"Unknown relation: {expr.relation[0]}")
+        return boolean
+
+    def expression(self, expr) -> sym_table.Type:
+        if isinstance(expr, ast.SimpleExpression):
+            return self.simple_expression(expr)
+        elif isinstance(expr, ast.ComplexExpression):
+            return self.complex_expression(expr)
+        else:
+            raise Exception(f"Unknown expression: {expr}")
 
     def assignment(self, a):
-        sym = self.context.symbol_table.find(a.ident)
-        f = self.context.current_function
-        f.body.extend(
+        sym = self._symbol_table.find(a.ident)
+        fn = self.current_function()
+        fn.body.extend(
             [
-                I.GlobalGet(global_=self.sp),
+                I.GlobalGet(global_=self._sp),
                 I.I32Const(value=sym.offset),
                 I.I32Sub(),
             ]
         )
         self.expression(a.expression)
-        f.body.append(I.I32Store())
-
-    def type_size(self, t):
-        if isinstance(t, ast.ArrayType):
-            return t.size * self.type_size(t.type)
-        if isinstance(t, ast.IntegerType):
-            return 4
-        if isinstance(t, ast.BooleanType):
-            return 4
-        raise ValueError(f"Unknown type: {t}")
+        fn.body.append(I.I32Store())
 
     def system_call(self, p, s):
-        assert len(p.params) == len(s.arguments)
+        logger.debug(f"System call: {p.ident}")
+        self.check(len(p.params) == len(s.arguments), "Wrong number of arguments")
         for i, a in enumerate(p.params):
             # TODO: check type
             if s.arguments[i].byref:
+                logger.debug(f"argument: {a} byref")
                 self.addr_of(a)
             else:
+                logger.debug(f"argument: {a} byval")
                 self.expression(a)
 
-        self.context.current_function.body.append(I.Call(function=s.syscall))
+        self.current_function().body.append(I.Call(function=s.syscall))
+
+    def while_loop(self, w):
+        fn = self.current_function()
+
+        fn.body.append(I.Block())
+        self.expression(w.condition)
+        fn.body.append(I.I32Const(value=0))
+        fn.body.append(I.I32Eq())
+        fn.body.append(I.BrIf(label=0))
+
+        fn.body.append(I.Loop())
+        self.statement_sequence(w.body.statements)
+        self.expression(w.condition)
+        fn.body.append(I.BrIf(label=0))
+        fn.body.append(I.End())
+
+        fn.body.append(I.End())
+
+    def if_statement(self, i):
+        fn = self.current_function()
+        self.expression(i.condition)
+        fn.body.append(I.If())
+        self.statement_sequence(i.then.statements)
+
+        for c, s in i.elsif:
+            fn.body.append(I.Else())
+            self.expression(c)
+            fn.body.append(I.If())
+            self.statement_sequence(s.statements)
+
+        if i.else_ is not None:
+            fn.body.append(I.Else())
+            self.statement_sequence(i.else_.statements)
+
+        for _ in range(len(i.elsif) + 1):
+            fn.body.append(I.End())
+
+    def statement_sequence(self, statements):
+        for s in statements:
+            if isinstance(s, ast.EmptyStatement):
+                pass
+            elif isinstance(s, ast.ProcedureCall):
+                self.procedure_call(s)
+            elif isinstance(s, ast.Assignment):
+                self.assignment(s)
+            elif isinstance(s, ast.While):
+                self.while_loop(s)
+            elif isinstance(s, ast.If):
+                self.if_statement(s)
+            else:
+                raise Exception(f"Unknown statement: {s}")
 
     def procedure_call(self, p):
-        s = self.context.symbol_table.find(p.ident)
-        if s is None:
-            raise ValueError(f"Unknown procedure: {p.ident}")
+        s = self._symbol_table.find(p.ident)
+        self.check(s is not None, f"Unknown procedure: {p.ident}")
         if isinstance(s, sym_table.SystemCall):
             self.system_call(p, s)
 
     def procedure(self, p):
-        if p.exported and len(p.params) > 0:
-            raise ValueError("Exported procedures cannot have parameters")
+        if p.exported:
+            self.check(
+                len(self._current_function) == 0,
+                "Exported procedures cannot have parameters",
+            )
 
         f = W.Function(type=W.FunctionType(params=[], results=[]))
-        self.context.current_function = f
+        self._current_function.append(f)
 
         for vl in p.declarations.var_declarations:
             ptr = 0
+            type = self._symbol_table.find(vl.type.ident, class_=sym_table.Type)
+            self.check(type is not None, f"Unknown type: {vl.type.ident}")
             for v in vl.ident_list:
-                self.context.symbol_table.add(
+                self._symbol_table.add(
                     sym_table.LocalVariable(
                         name=v,
-                        type=vl.type,
-                        size=self.type_size(vl.type),
+                        type=type,
                         offset=ptr,
                     )
                 )
-                ptr += self.type_size(vl.type)
+                ptr += type.size
 
         # Procedure preamble (make room for local variables)
         f.body.extend(
             [
-                I.GlobalGet(global_=self.sp),
+                I.GlobalGet(global_=self._sp),
                 I.I32Const(value=ptr),
                 I.I32Sub(),
-                I.GlobalSet(global_=self.sp),
+                I.GlobalSet(global_=self._sp),
             ]
         )
 
-        for s in p.body.statements:
-            if isinstance(s, ast.ProcedureCall):
-                self.procedure_call(s)
-            elif isinstance(s, ast.Assignment):
-                self.assignment(s)
+        self.statement_sequence(p.body.statements)
 
         # Procedure postamble (reclaim memory for local variables)
         f.body.extend(
             [
-                I.GlobalGet(global_=self.sp),
+                I.GlobalGet(global_=self._sp),
                 I.I32Const(value=ptr),
                 I.I32Add(),
-                I.GlobalSet(global_=self.sp),
+                I.GlobalSet(global_=self._sp),
             ]
         )
 
@@ -280,9 +413,23 @@ class CodeGenerator:
         if p.exported:
             self.code.exports.append(W.Export(node=f, name=p.ident))
 
-    def generate(self, filename):
-        assert isinstance(self.ast, ast.Module)
+        self._current_function.pop()
+
+    def generate(self, io):
+        # Start with an empty symbol table
+        CodeGenerator._symbol_table = SymbolTable()
+
+        self.check(isinstance(self.ast, ast.Module), "Module expected")
+        self._symbol_table.new_scope()
         self.code = W.Module()
+
+        self._symbol_table.add(
+            sym_table.Type(name="INTEGER", type=ast.Type(ident="INTEGER"), size=4)
+        )
+        self._symbol_table.add(
+            sym_table.Type(name="BOOLEAN", type=ast.Type(ident="BOOLEAN"), size=4)
+        )
+
         self.add_syscalls()
         self.add_memory()
         self.add_stack_pointer()
@@ -291,5 +438,4 @@ class CodeGenerator:
         for p in d.procedure_declarations:
             self.procedure(p)
 
-        with open(filename, "wb") as f:
-            f.write(bytes(self.code))
+        io.write(bytes(self.code))

@@ -9,9 +9,20 @@ Oberon-0 Abstract Syntax Tree
 
 from pydantic import BaseModel
 
+actual_scanner = None
+
 
 class Node(BaseModel):
-    pass
+
+    file_name: str = ""
+    line_no: int = 0
+    col_no: int = 0
+
+    def model_post_init(self, __context):
+        if actual_scanner:
+            self.file_name = actual_scanner.file_name
+            self.line_no = actual_scanner.line_no
+            self.col_no = actual_scanner.col_no
 
     def __str__(self):
         return ""
@@ -102,24 +113,6 @@ class FormalParameter(Node):
 
 
 class Type(Node):
-    pass
-
-
-class IntegerType(Type):
-    pass
-
-    def __str__(self):
-        return "INTEGER"
-
-
-class BooleanType(Type):
-    pass
-
-    def __str__(self):
-        return "BOOLEAN"
-
-
-class CustomType(Type):
     ident: str
 
     def __str__(self):
@@ -142,6 +135,10 @@ class StatementSequence(Node):
 
 
 class Statement(Node):
+    pass
+
+
+class EmptyStatement(Statement):
     pass
 
     def __str__(self):
@@ -199,7 +196,6 @@ class Repeat(Statement):
 
 
 class Expression(Node):
-    pass
 
     def __str__(self):
         return ""

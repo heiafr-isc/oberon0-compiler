@@ -22,13 +22,13 @@ class Scanner(BaseModel):
     eof: bool = False
     sym: Enum | None = None  # Next Symbol
     value: str = ""
+    file_name: Path | None = None
+    line_no: int = 0
+    col_no: int = 0
 
     _ch: str = ""
-    _file_name: Path | None = None
     _text: typing.TextIO | None = None
     _text_line: str = ""
-    _line_no: int = 0
-    _col_no: int = 0
 
     _keyword = {str(i): i for i in Token if str(i).isupper()}
     _symbol = {
@@ -38,16 +38,16 @@ class Scanner(BaseModel):
     def open(self, text: io.TextIOBase) -> None:
         self._text = text
         if hasattr(text, "name"):
-            self._file_name = Path(text.name)
+            self.file_name = Path(text.name)
         else:
-            self._file_name = None
+            self.file_name = None
 
         self.get_next_char()
 
     def raise_error(self, msg: str) -> None:
         logger.error(msg)
         raise SyntaxError(
-            msg, (self._file_name, self._line_no, self._col_no, self._text_line)
+            msg, (self.file_name, self.line_no, self.col_no, self._text_line)
         )
 
     def skip_space(self):
@@ -74,8 +74,8 @@ class Scanner(BaseModel):
     def get_next_char(self):
         while not self.eof and self._text_line == "":
             self._text_line = self._text.readline()
-            self._line_no += 1
-            self._col_no = 0
+            self.line_no += 1
+            self.col_no = 0
             if self._text_line == "":
                 self.eof = True
                 break
@@ -86,7 +86,7 @@ class Scanner(BaseModel):
             assert self._text_line != ""
             self._ch = self._text_line[0]
             self._text_line = self._text_line[1:]
-            self._col_no += 1
+            self.col_no += 1
 
     def get_next_symbol(self):  # noqa: C901
 
@@ -128,10 +128,10 @@ class Scanner(BaseModel):
                 else:
                     self.sym = Token.IDENT
             elif self._ch.isdigit():
-                self.value = int(self._ch)
+                self.value = self._ch
                 self.get_next_char()
                 while self._ch.isdigit():
-                    self.value = self.value * 10 + int(self._ch)
+                    self.value += self._ch
                     self.get_next_char()
                 self.sym = Token.NUMBER
             else:

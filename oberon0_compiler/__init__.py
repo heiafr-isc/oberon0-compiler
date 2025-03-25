@@ -44,7 +44,7 @@ def main(  # noqa: PLR0913
 
     logger.remove()
 
-    level_per_module = {"": "INFO", "oberon0_compiler.code_gen": "INFO"}
+    level_per_module = {"": "INFO"}
 
     if debug:
         level_per_module[""] = "DEBUG"
@@ -79,11 +79,12 @@ def main(  # noqa: PLR0913
     if show_tree:
         console.print(Panel(Pretty(ast, indent_size=2), title="Syntax Tree"))
 
-    gen = CodeGenerator(ast)
+    gen = CodeGenerator(ast=ast)
 
     if destination is None:
         destination = Path(source.name).stem + ".wasm"
-    gen.generate(destination)
+    with open(destination, "wb") as f:
+        gen.generate(f)
 
 
 if __name__ == "__main__":

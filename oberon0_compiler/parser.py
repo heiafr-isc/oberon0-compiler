@@ -64,7 +64,7 @@ class Parser(BaseModel):
         elif self.scanner.sym == Token.NUMBER:
             value = self.scanner.value
             self.scanner.get_next_symbol()
-            return ast.Number(value=value)
+            return ast.Number(value=int(value))
         elif self.scanner.sym == Token.LPAREN:
             self.scanner.get_next_symbol()
             e = self.expression()
@@ -106,6 +106,7 @@ class Parser(BaseModel):
             return ast.SimpleExpression(sign=sign, term=t, addop_terms=a)
 
         e = simple_expression()
+
         if self.scanner.sym in [
             Token.EQL,
             Token.NEQ,
@@ -169,7 +170,11 @@ class Parser(BaseModel):
             else_ = None
             while self.scanner.sym == Token.ELSIF:
                 self.scanner.get_next_symbol()
-                elsif.append((self.expression(), self.statement_sequence()))
+                e = self.expression()
+                self.check_sym(Token.THEN)
+                self.scanner.get_next_symbol()
+                s = self.statement_sequence()
+                elsif.append((e, s))
             if self.scanner.sym == Token.ELSE:
                 self.scanner.get_next_symbol()
                 else_ = self.statement_sequence()
@@ -206,7 +211,7 @@ class Parser(BaseModel):
         elif self.scanner.sym == Token.REPEAT:
             return repeat_statement()
         else:  # Empty statement
-            return ast.Statement()
+            return ast.EmptyStatement()
 
     def ident_list(self) -> list[str]:
         logger.debug("parsing ident_list")
@@ -226,10 +231,10 @@ class Parser(BaseModel):
             ident = self.scanner.value
             self.scanner.get_next_symbol()
             if ident == "INTEGER":
-                return ast.IntegerType()
+                return ast.Type(ident="INTEGER")
             elif ident == "BOOLEAN":
-                return ast.BooleanType()
-            return ast.CustomType(ident=ident)
+                return ast.Type(ident="BOOLEAN")
+            return ast.Type(ident=ident)
         elif self.scanner.sym == Token.ARRAY:
             self.scanner.get_next_symbol()
             expr = self.expression()
@@ -393,7 +398,7 @@ class Parser(BaseModel):
         self.check_sym(Token.IDENT)
 
         if self.scanner.value != name:
-            self.error(f"Expected '{name}', but got '{self.scanner.value}'")
+            self.raise_error(f"Expected '{name}', but got '{self.scanner.value}'")
 
         self.scanner.get_next_symbol()
         self.check_sym(Token.PERIOD)
@@ -404,5 +409,6 @@ class Parser(BaseModel):
 
     def parse(self):
         logger.debug("Parsing")
+        ast.actual_scanner = self.scanner
         self.scanner.get_next_symbol()
         return self.module()
