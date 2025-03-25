@@ -5,15 +5,13 @@ SPDX-License-Identifier: Apache-2.0 OR MIT
 
 MODULE Test;
 
-    PROCEDURE Mul *;
-        VAR x, y, z: INTEGER;
+    PROCEDURE Bool*;
+        VAR x, y : INTEGER; z : BOOLEAN;
     BEGIN
         OpenInput;
         ReadInt(x);
         ReadInt(y);
-        z := x * y;
-        WriteInt(z, 5);
-        WriteLn;
-    END Mul;
+        z := x > y;
+    END Bool;
 
 END Test.

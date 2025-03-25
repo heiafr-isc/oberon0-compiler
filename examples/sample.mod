@@ -26,11 +26,12 @@ MODULE Samples;
         WriteInt(x, 4); WriteInt(y, 4); WriteInt(q, 4); WriteInt(r, 4); WriteLn
     END Divide;
 
+
     PROCEDURE Sum*;
         VAR n, s: INTEGER;
     BEGIN OpenInput; s:= 0;
         WHILE ~eot() DO ReadInt(n); WriteInt(n, 4); s := s + n END ;
-        WriteInt(s, 6); WriteLn
+        WriteInt(s, 6); WriteLn;
     END Sum;
 
 END Samples.
