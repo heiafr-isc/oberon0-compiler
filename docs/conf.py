@@ -21,7 +21,7 @@ sys.path.insert(0, str(Path(__file__).parent / "../src"))
 project = "Oberon-0 Compiler"
 copyright = "2026, Jacques Supcik"
 author = "Jacques Supcik"
-release = "0.1.0"
+release = "0.1.1"
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
