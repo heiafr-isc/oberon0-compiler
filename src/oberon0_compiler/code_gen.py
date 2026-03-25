@@ -6,7 +6,6 @@
 Oberon-2 WASM Code Generator
 """
 
-
 from dataclasses import dataclass, field
 from typing import BinaryIO
 
