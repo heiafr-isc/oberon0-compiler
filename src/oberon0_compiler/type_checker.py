@@ -14,7 +14,7 @@ from rich.console import Console
 
 from . import ast, types
 from . import sym_table as SYM
-from .parser import Position
+from .scanner import Position
 
 console = Console()
 
@@ -167,9 +167,9 @@ class TypeChecker:
     ) -> None:
         logger.debug(f"System call: {p.symbol.name}")
         self.ensure(p, len(p.params) == len(s.params), "Wrong number of arguments")
-        for i, a in enumerate(p.params):
-            # TODO: check type
-            pass
+        # for i, a in enumerate(p.params):
+        #     # TODO: check type
+        #     pass
 
     def while_loop(self, w: ast.While) -> None:
         self.expression(w.condition)

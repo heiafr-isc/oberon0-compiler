@@ -70,8 +70,8 @@ def main(  # noqa: PLR0913
 
     scanner = Scanner()
     try:
-        f = source.open("r")
-        scanner.open(f)
+        source_file = source.open("r")
+        scanner.open(source_file)
     except OSError as e:
         logger.error(f"Cannot open source file {source}: {e}")
         raise typer.Exit(code=1) from e
@@ -101,8 +101,12 @@ def main(  # noqa: PLR0913
     if destination is None:
         destination = Path(source.name).with_suffix(".wasm")
 
-    with destination.open("wb") as f:
-        gen.generate(ast_, f)
+    with destination.open("wb") as output_file:
+        try:
+            gen.generate(ast_, output_file)
+        except Exception as e:
+            logger.error(f"Code generation failed: {e}")
+            raise typer.Exit(code=1) from e
 
 
 if __name__ == "__main__":

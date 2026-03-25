@@ -52,9 +52,9 @@ def eval_const(expr: ast.Node) -> int:
             x = -x
         return x
     elif isinstance(expr, ast.Term):
-        x: int = eval_const(expr.factor)
+        x = eval_const(expr.factor)
         for op, f in expr.mulop_factors:
-            y: int = eval_const(f)
+            y = eval_const(f)
             if op == "*":
                 x *= y
             elif op == "DIV":
