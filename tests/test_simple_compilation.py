@@ -22,24 +22,24 @@ def compile(src: TextIOBase) -> BytesIO:
     return dst
 
 
-def simple_test(name: str):
+def simple_test(name: str) -> None:
     with open(Path(__file__).parent / f"mod/{name}.mod") as src:
         dst = compile(src)
     with open(Path(__file__).parent / f"mod/{name}.wasm", "rb") as expected:
         assert dst.getvalue() == expected.read()
 
 
-def test_add():
+def test_add() -> None:
     simple_test("add")
 
 
-def test_mul():
+def test_mul() -> None:
     simple_test("mul")
 
 
-def test_ops():
+def test_ops() -> None:
     simple_test("ops")
 
 
-def test_sample():
+def test_sample() -> None:
     simple_test("sample")
