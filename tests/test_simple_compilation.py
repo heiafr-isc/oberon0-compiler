@@ -25,7 +25,7 @@ def compile(src: TextIOBase) -> BytesIO:
 def simple_test(name: str) -> None:
     with open(Path(__file__).parent / f"mod/{name}.mod") as src:
         dst = compile(src)
-    with open(Path(__file__).parent / f"mod/{name}.wasm", "rb") as expected:
+    with open(Path(__file__).parent / f"mod/{name}.wasm.expected", "rb") as expected:
         assert dst.getvalue() == expected.read()
 
 
