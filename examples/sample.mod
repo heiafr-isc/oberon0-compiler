@@ -30,8 +30,8 @@ MODULE Samples;
     PROCEDURE Sum*;
         VAR n, s: INTEGER;
     BEGIN OpenInput; s:= 0;
-        WHILE ~eot() DO ReadInt(n); WriteInt(n, 4); s := s + n END ;
-        WriteInt(s, 6); WriteLn;
+        WHILE ~eot() DO ReadInt(n); WriteInt(n, 10); s := s + n END ;
+        WriteInt(s, 10); WriteLn;
     END Sum;
 
 END Samples.

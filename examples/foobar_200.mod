@@ -6,10 +6,10 @@ SPDX-License-Identifier: Apache-2.0 OR MIT
 MODULE FooBar;
 
     PROCEDURE FooBar*;
-        VAR i, n: INTEGER;
-    BEGIN OpenInput; ReadInt(n);
+        VAR i : INTEGER;
+    BEGIN
         i := 1;
-        WHILE i <= n DO
+        WHILE i <= 200 DO
             IF (i MOD 5 = 0) & (i MOD 7 = 0) THEN
                 WriteChar(70); WriteChar(111); WriteChar(111);
                 WriteChar(66); WriteChar(97); WriteChar(114); WriteLn;
@@ -24,6 +24,5 @@ MODULE FooBar;
         END ;
 
     END FooBar;
-
 
 END FooBar.

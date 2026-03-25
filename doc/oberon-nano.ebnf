@@ -1,0 +1,17 @@
+ident = letter {letter | digit}.
+integer = digit {digit}.
+factor = ident | integer.
+expression = ["+"|"-"] factor {("+"|"-") factor}.
+assignment = ident ":=" expression.
+ActualParameters = "(" [expression {"," expression}] ")" .
+SystemCall = ident [ActualParameters].
+statement = [assignment | SystemCall].
+StatementSequence = statement {";" statement}.
+IdentList = ident {"," ident}.
+ProcedureDeclaration = "PROCEDURE" ident ";"
+    ["VAR" {IdentList ";"}]
+    ["BEGIN" StatementSequence]
+    "END" ident.
+module = "MODULE" ident ";"
+    {ProcedureDeclaration ";"}
+    "END" ident "." .

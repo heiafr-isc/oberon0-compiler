@@ -7,18 +7,25 @@ Oberon-0 scanner
 """
 
 import io
-import typing
+from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
 from loguru import logger
-from pydantic import BaseModel
 
-from oberon0_compiler.token import Token
+from .token import Token
+
+
+@dataclass
+class Position:
+    file_name: str
+    line_no: int
+    col_no: int
 
 
 # @typing.no_type_check
-class Scanner(BaseModel):
+@dataclass
+class Scanner:
     eof: bool = False
     sym: Enum | None = None  # Next Symbol
     value: str = ""
@@ -27,7 +34,7 @@ class Scanner(BaseModel):
     col_no: int = 0
 
     _ch: str = ""
-    _text: typing.TextIO | None = None
+    _text: io.TextIOBase | None = None
     _text_line: str = ""
 
     _keyword = {str(i): i for i in Token if str(i).isupper()}
@@ -37,28 +44,34 @@ class Scanner(BaseModel):
 
     def open(self, text: io.TextIOBase) -> None:
         self._text = text
-        if hasattr(text, "name"):
+        if isinstance(text, io.TextIOWrapper):
             self.file_name = Path(text.name)
         else:
             self.file_name = None
 
         self.get_next_char()
 
-    def raise_error(self, msg: str) -> None:
-        logger.error(msg)
-        raise SyntaxError(
-            msg, (self.file_name, self.line_no, self.col_no, self._text_line)
+    def position(self) -> Position:
+        return Position(
+            file_name=str(self.file_name) if self.file_name else "",
+            line_no=self.line_no,
+            col_no=self.col_no,
         )
 
-    def skip_space(self):
+    def raise_error(self, msg: str) -> None:
+        p = self.position()
+        logger.error(f"{p.file_name}:{p.line_no}:{p.col_no}: {msg}")
+        raise Exception(msg)
+
+    def skip_space(self) -> None:
         while self._ch.isspace():
             self.get_next_char()
 
-    def skip_comment(self):
+    def skip_comment(self) -> None:
         while True:
             self.get_next_char()
             if self.eof:
-                self.error("Unterminated comment")
+                self.raise_error("Unterminated comment")
                 return
             if self._ch == "(":
                 self.get_next_char()
@@ -71,7 +84,8 @@ class Scanner(BaseModel):
                     self.get_next_char()
                     return
 
-    def get_next_char(self):
+    def get_next_char(self) -> None:
+        assert self._text is not None
         while not self.eof and self._text_line == "":
             self._text_line = self._text.readline()
             self.line_no += 1
@@ -88,30 +102,26 @@ class Scanner(BaseModel):
             self._text_line = self._text_line[1:]
             self.col_no += 1
 
-    def get_next_symbol(self):  # noqa: C901
+    def get_next_symbol(self) -> None:  # noqa: C901
 
         def token() -> tuple[Enum, str]:
-            value = ""
             prev_token = None
             prev_value = None
-            while True:
+            value = ""
+            while not self.eof:
                 value += self._ch
-                candidates = set(
-                    [i for i in self._symbol.keys() if i.startswith(value)]
-                )
-                if len(candidates) <= 0:
-                    if prev_token is None:
-                        self.error(f"Unknown symbol '{value}'")
-                        return (Token.OTHER, value)
-                    else:
-                        return (prev_token, prev_value)
-                elif len(candidates) == 1:
-                    self.get_next_char()
-                    return (self._symbol[candidates.pop()], value)
-                else:
-                    prev_token = self._symbol.get(value, None)
-                    prev_value = value
-                    self.get_next_char()
+                t = self._symbol.get(value, None)
+                if t is None:
+                    break
+                prev_token = t
+                prev_value = value
+                self.get_next_char()
+            if prev_token is None:
+                self.raise_error(f"Unknown symbol '{value}'")
+                return (Token.OTHER, value)
+            else:
+                assert prev_value is not None
+                return (prev_token, prev_value)
 
         while True:
             self.skip_space()

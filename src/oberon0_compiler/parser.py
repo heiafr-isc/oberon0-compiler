@@ -7,19 +7,30 @@ Oberon-0 parser
 """
 
 import typing
+from dataclasses import dataclass, field
 
+import wasm_gen as W  # noqa
 from loguru import logger
-from pydantic import BaseModel
 
-from oberon0_compiler import ast
-from oberon0_compiler.scanner import Scanner
-from oberon0_compiler.token import Token
+from . import ast, systemcalls, types
+from . import sym_table as SYM
+from .scanner import Scanner
+from .token import Token
 
 
-class Parser(BaseModel):
+def evaluate(expr: "ast.Expression") -> int:
+    if isinstance(expr, ast.Number):
+        return expr.value
+    else:
+        raise ValueError("Not yet implemented")
+
+
+@dataclass
+class Parser:
 
     scanner: Scanner
     has_error: bool = False
+    sym_table: SYM.SymbolTable = field(default_factory=SYM.SymbolTable)
 
     def raise_error(self, msg: str) -> None:
         self.has_error = True
@@ -30,53 +41,45 @@ class Parser(BaseModel):
         if self.scanner.sym != expected:
             self.raise_error(f"Expected '{expected}', but got '{self.scanner.sym}'")
 
-    def index_selector(self) -> list["ast.IndexSelector"]:
-        logger.debug("parsing index_selector")
-        s = []
-        while self.scanner.sym == Token.LBRACK:
-            self.scanner.get_next_symbol()
-            s.append(ast.IndexSelector(expression=self.expression()))
-            self.check_sym(Token.RBRACK)
-            self.scanner.get_next_symbol()
-        return s
-
     def factor(self) -> "ast.Factor":
         logger.debug("parsing factor")
         if self.scanner.sym == Token.IDENT:
             ident = self.scanner.value
+            sym = self.sym_table.get(ident)
+
             self.scanner.get_next_symbol()
-            if self.scanner.sym == Token.LPAREN:
+            next_sym = typing.cast(Token | None, self.scanner.sym)
+            if next_sym == Token.LPAREN:
                 self.scanner.get_next_symbol()
                 params = []
-                if self.scanner.sym != Token.RPAREN:
+                param_sym = typing.cast(Token | None, self.scanner.sym)
+                if param_sym != Token.RPAREN:
                     params.append(self.expression())
-                    while self.scanner.sym == Token.COMMA:
+                    while typing.cast(Token | None, self.scanner.sym) == Token.COMMA:
                         self.scanner.get_next_symbol()
                         params.append(self.expression())
                 self.check_sym(Token.RPAREN)
                 self.scanner.get_next_symbol()
-                return ast.FunctionCall(ident=ident, params=params)
-            if self.scanner.sym in {Token.PERIOD, Token.LBRACK}:
-                selector = self.index_selector()
-            else:
-                selector = []
-            return ast.SimpleFactor(ident=ident, selector=selector)
+                return ast.FunctionCall(
+                    position=self.scanner.position(), symbol=sym, params=params
+                )
+            return ast.SimpleFactor(position=self.scanner.position(), symbol=sym)
         elif self.scanner.sym == Token.NUMBER:
             value = self.scanner.value
             self.scanner.get_next_symbol()
-            return ast.Number(value=int(value))
+            return ast.Number(position=self.scanner.position(), value=int(value))
         elif self.scanner.sym == Token.LPAREN:
             self.scanner.get_next_symbol()
             e = self.expression()
             self.check_sym(Token.RPAREN)
             self.scanner.get_next_symbol()
-            return ast.ExpressionFactor(expression=e)
+            return ast.ExpressionFactor(position=self.scanner.position(), expression=e)
         elif self.scanner.sym == Token.NOT:
             self.scanner.get_next_symbol()
-            return ast.Negation(factor=self.factor())
+            return ast.Negation(position=self.scanner.position(), factor=self.factor())
         else:
             self.raise_error(f"Expected factor, but got '{self.scanner.sym}'")
-            return ast.Factor()
+            return ast.Factor(position=self.scanner.position())
 
     def term(self) -> "ast.Term":
         logger.debug("parsing term")
@@ -86,12 +89,12 @@ class Parser(BaseModel):
             op = self.scanner.value
             self.scanner.get_next_symbol()
             m.append((op, self.factor()))
-        return ast.Term(factor=f, mulop_factors=m)
+        return ast.Term(position=self.scanner.position(), factor=f, mulop_factors=m)
 
     def expression(self) -> "ast.Expression":
         logger.debug("parsing expression")
 
-        def simple_expression():
+        def simple_expression() -> ast.SimpleExpression:
             logger.debug("parsing simple_expression")
             sign = None
             if self.scanner.sym in {Token.PLUS, Token.MINUS}:
@@ -103,9 +106,13 @@ class Parser(BaseModel):
                 op = self.scanner.value
                 self.scanner.get_next_symbol()
                 a.append((op, self.term()))
-            return ast.SimpleExpression(sign=sign, term=t, addop_terms=a)
+            return ast.SimpleExpression(
+                position=self.scanner.position(), sign=sign, term=t, addop_terms=a
+            )
 
-        e = simple_expression()
+        e: ast.Expression = simple_expression()
+
+        assert isinstance(e, ast.SimpleExpression)
 
         if self.scanner.sym in [
             Token.EQL,
@@ -118,7 +125,9 @@ class Parser(BaseModel):
             op = self.scanner.value
             self.scanner.get_next_symbol()
             e = ast.ComplexExpression(
-                simple_expression=e, relation=(op, simple_expression())
+                position=self.scanner.position(),
+                simple_expression=e,
+                relation=(op, simple_expression()),
             )
         return e
 
@@ -128,38 +137,44 @@ class Parser(BaseModel):
         while self.scanner.sym == Token.SEMICOLON:
             self.scanner.get_next_symbol()
             s.append(self.statement())
-        return ast.StatementSequence(statements=s)
+        return ast.StatementSequence(position=self.scanner.position(), statements=s)
 
     def statement(self) -> "ast.Statement":  # noqa: C901 PLR0915
         logger.debug("parsing statement")
 
-        def assignment_or_procedure_call():
+        def assignment_or_procedure_call() -> ast.Statement:
             logger.debug("parsing assignment_or_procedure_call")
             ident = self.scanner.value
+            sym = self.sym_table.get(ident)
             self.scanner.get_next_symbol()
-            if self.scanner.sym in [Token.PERIOD, Token.LBRACK]:
-                selector = self.index_selector()
-            else:
-                selector = []
             if self.scanner.sym == Token.BECOMES:
                 self.scanner.get_next_symbol()
                 return ast.Assignment(
-                    ident=ident, selector=selector, expression=self.expression()
+                    position=self.scanner.position(),
+                    symbol=sym,
+                    expression=self.expression(),
                 )
             else:
                 params = []
                 if self.scanner.sym == Token.LPAREN:
                     self.scanner.get_next_symbol()
-                    if self.scanner.sym != Token.RPAREN:
+                    next_sym = typing.cast(Token | None, self.scanner.sym)
+                    if next_sym != Token.RPAREN:
                         params.append(self.expression())
-                        while self.scanner.sym == Token.COMMA:
+                        while (
+                            typing.cast(Token | None, self.scanner.sym) == Token.COMMA
+                        ):
                             self.scanner.get_next_symbol()
                             params.append(self.expression())
                     self.check_sym(Token.RPAREN)
                     self.scanner.get_next_symbol()
-                return ast.ProcedureCall(ident=ident, selector=selector, params=params)
+                return ast.ProcedureCall(
+                    position=self.scanner.position(),
+                    symbol=sym,
+                    params=params,
+                )
 
-        def if_statement():
+        def if_statement() -> ast.If:
             logger.debug("parsing if_statement")
             self.scanner.get_next_symbol()
             condition = self.expression()
@@ -180,9 +195,15 @@ class Parser(BaseModel):
                 else_ = self.statement_sequence()
             self.check_sym(Token.END)
             self.scanner.get_next_symbol()
-            return ast.If(condition=condition, then=then, elsif=elsif, else_=else_)
+            return ast.If(
+                position=self.scanner.position(),
+                condition=condition,
+                then=then,
+                elsif=elsif,
+                else_=else_,
+            )
 
-        def while_statement():
+        def while_statement() -> ast.While:
             logger.debug("parsing while_statement")
             self.scanner.get_next_symbol()
             condition = self.expression()
@@ -191,16 +212,20 @@ class Parser(BaseModel):
             body = self.statement_sequence()
             self.check_sym(Token.END)
             self.scanner.get_next_symbol()
-            return ast.While(condition=condition, body=body)
+            return ast.While(
+                position=self.scanner.position(), condition=condition, body=body
+            )
 
-        def repeat_statement():
+        def repeat_statement() -> ast.Repeat:
             logger.debug("parsing repeat_statement")
             self.scanner.get_next_symbol()
             body = self.statement_sequence()
             self.check_sym(Token.UNTIL)
             self.scanner.get_next_symbol()
             condition = self.expression()
-            return ast.Repeat(body=body, condition=condition)
+            return ast.Repeat(
+                position=self.scanner.position(), body=body, condition=condition
+            )
 
         if self.scanner.sym == Token.IDENT:
             return assignment_or_procedure_call()
@@ -211,7 +236,7 @@ class Parser(BaseModel):
         elif self.scanner.sym == Token.REPEAT:
             return repeat_statement()
         else:  # Empty statement
-            return ast.EmptyStatement()
+            return ast.EmptyStatement(position=self.scanner.position())
 
     def ident_list(self) -> list[str]:
         logger.debug("parsing ident_list")
@@ -228,81 +253,92 @@ class Parser(BaseModel):
     def type_(self) -> "ast.Type":
         logger.debug("parsing type")
         if self.scanner.sym == Token.IDENT:
-            ident = self.scanner.value
+            ident = self.sym_table.get(self.scanner.value)
             self.scanner.get_next_symbol()
-            if ident == "INTEGER":
-                return ast.Type(ident="INTEGER")
-            elif ident == "BOOLEAN":
-                return ast.Type(ident="BOOLEAN")
-            return ast.Type(ident=ident)
-        elif self.scanner.sym == Token.ARRAY:
-            self.scanner.get_next_symbol()
-            expr = self.expression()
-            self.check_sym(Token.OF)
-            self.scanner.get_next_symbol()
-            t = self.type_()
-            return ast.ArrayType(size=expr, type=t)
+            return ast.NamedType(position=self.scanner.position(), ident=ident)
         else:
             self.raise_error(f"Expected type, but got '{self.scanner.sym}'")
-            return ast.Type()
+            return ast.Type(position=self.scanner.position())
 
-    def declarations(self) -> "ast.Declarations":  # noqa: C901 PLR0915
+    def declarations(
+        self, global_: bool = False
+    ) -> "ast.Declarations":  # noqa: C901 PLR0915
         logger.debug("parsing declarations")
 
-        def const_declaration():
+        def const_declaration() -> list[ast.ConstantDeclaration]:
             logger.debug("parsing const_declaration")
-            c = []
+            c: list[ast.ConstantDeclaration] = []
             if self.scanner.sym == Token.CONST:
                 self.scanner.get_next_symbol()
-                while self.scanner.sym == Token.IDENT:
+                while typing.cast(Token | None, self.scanner.sym) == Token.IDENT:
                     ident = self.scanner.value
                     self.scanner.get_next_symbol()
                     self.check_sym(Token.EQL)
                     self.scanner.get_next_symbol()
+                    sym = SYM.Constant(name=ident, value=evaluate(self.expression()))
+                    self.sym_table.add(sym)
                     c.append(
                         ast.ConstantDeclaration(
-                            ident=ident, expression=self.expression()
-                        )
+                            position=self.scanner.position(), symbol=sym
+                        ),
                     )
                     self.check_sym(Token.SEMICOLON)
                     self.scanner.get_next_symbol()
             return c
 
-        def type_declaration():
-            logger.debug("parsing type_declaration")
-            t = []
-            if self.scanner.sym == Token.TYPE:
-                self.scanner.get_next_symbol()
-                while self.scanner.sym == Token.IDENT:
-                    ident = self.scanner.value
-                    self.scanner.get_next_symbol()
-                    self.check_sym(Token.EQ)
-                    self.scanner.get_next_symbol()
-                    t.append(ast.TypeDeclaration(ident=ident, type=self.type_()))
-                    self.check_sym(Token.SEMICOLON)
-                    self.scanner.get_next_symbol()
-            return t
-
-        def var_declaration():
+        def var_declaration() -> list[ast.VariableDeclaration]:
             logger.debug("parsing var_declaration")
-            v = []
+            v: list[ast.VariableDeclaration] = []
+            offset = 0
             if self.scanner.sym == Token.VAR:
                 self.scanner.get_next_symbol()
-                while self.scanner.sym == Token.IDENT:
+                while typing.cast(Token | None, self.scanner.sym) == Token.IDENT:
                     idents = self.ident_list()
                     self.check_sym(Token.COLON)
                     self.scanner.get_next_symbol()
-                    v.append(
-                        ast.VariableDeclaration(ident_list=idents, type=self.type_())
-                    )
+                    type_ = self.sym_table.type_(self.scanner.value)
+                    self.scanner.get_next_symbol()
+                    for i in idents:
+                        sym: SYM.Variable
+                        if global_:
+                            sym = SYM.GlobalVariable(name=i, offset=offset, type_=type_)
+                        else:
+                            sym = SYM.LocalVariable(name=i, offset=offset, type_=type_)
+                        self.sym_table.add(sym)
+                        offset += type_.size
+                        v.append(
+                            ast.VariableDeclaration(
+                                position=self.scanner.position(),
+                                symbol=sym,
+                            )
+                        )
                     self.check_sym(Token.SEMICOLON)
                     self.scanner.get_next_symbol()
             return v
 
-        def procedure_declaration():
+        def procedure_declaration() -> list[ast.ProcedureDeclaration]:
             logger.debug("parsing procedure_declaration")
 
-            def procedure_heading():
+            def fp_section() -> list[SYM.FormalParameter]:
+                by_ref = False
+                if self.scanner.sym == Token.VAR:
+                    by_ref = True
+                    self.scanner.get_next_symbol()
+                fp_idents = self.ident_list()
+                self.check_sym(Token.COLON)
+                self.scanner.get_next_symbol()
+                type_ = self.sym_table.type_(self.scanner.value)
+                res = []
+                for index, i in enumerate(fp_idents):
+                    sym = SYM.FormalParameter(
+                        name=i, type_=type_, index=index, by_ref=by_ref
+                    )
+                    self.sym_table.add(sym)
+                    res.append(sym)
+
+                return res
+
+            def procedure_heading() -> tuple[str, bool, list[SYM.FormalParameter]]:
                 logger.debug("parsing procedure_heading")
                 self.scanner.get_next_symbol()
                 self.check_sym(Token.IDENT)
@@ -312,26 +348,23 @@ class Parser(BaseModel):
                 if self.scanner.sym == Token.TIMES:
                     exported = True
                     self.scanner.get_next_symbol()
-                params = []
+                params: list[SYM.FormalParameter] = []
                 if self.scanner.sym == Token.LPAREN:
                     self.scanner.get_next_symbol()
-                    while self.scanner.sym != Token.RPAREN:
-                        by_ref = False
-                        if self.scanner.sym == Token.VAR:
-                            by_ref = True
+
+                    while typing.cast(Token | None, self.scanner.sym) != Token.RPAREN:
+                        params.extend(fp_section())
+                        while (
+                            typing.cast(Token | None, self.scanner.sym)
+                            == Token.SEMICOLON
+                        ):
                             self.scanner.get_next_symbol()
-                        fp_idents = self.ident_list()
-                        self.check_sym(Token.COLON)
-                        self.scanner.get_next_symbol()
-                        params.append(
-                            ast.FormalParameter(
-                                by_ref=by_ref, ident_list=fp_idents, type=self.type_()
-                            )
-                        )
+                            params.extend(fp_section())
+
                     self.scanner.get_next_symbol()
                 return (ident, exported, params)
 
-            def procedure_body():
+            def procedure_body() -> tuple[ast.Declarations, ast.StatementSequence, str]:
                 logger.debug("parsing procedure_body")
                 d = self.declarations()
                 self.check_sym(Token.BEGIN)
@@ -339,7 +372,9 @@ class Parser(BaseModel):
                 if self.scanner.sym != Token.END:
                     st_seq = self.statement_sequence()
                 else:
-                    st_seq = ast.StatementSequence(statements=[])
+                    st_seq = ast.StatementSequence(
+                        position=self.scanner.position(), statements=[]
+                    )
                 self.check_sym(Token.END)
                 self.scanner.get_next_symbol()
                 self.check_sym(Token.IDENT)
@@ -347,23 +382,34 @@ class Parser(BaseModel):
                 self.scanner.get_next_symbol()
                 self.check_sym(Token.SEMICOLON)
                 self.scanner.get_next_symbol()
-
                 return (d, st_seq, ident)
 
             p = []
             while self.scanner.sym == Token.PROCEDURE:
+                self.sym_table.new_scope()
                 ident, exported, params = procedure_heading()
                 self.check_sym(Token.SEMICOLON)
                 self.scanner.get_next_symbol()
                 decl, body, end_ident = procedure_body()
                 if ident != end_ident:
-                    self.error(f"Expected '{ident}', but got '{end_ident}'")
+                    self.raise_error(f"Expected '{ident}', but got '{end_ident}'")
+                # Compute stack size for local variables
+                stack_size = sum(
+                    i.type_.size
+                    for i in self.sym_table.current_scope().symbols.values()
+                    if isinstance(i, SYM.LocalVariable)
+                )
+                self.sym_table.close_scope()
+                sym = SYM.ProcedureDefinition(
+                    name=ident, exported=exported, stack_size=stack_size, params=params
+                )
+                self.sym_table.add(sym)
 
                 p.append(
                     ast.ProcedureDeclaration(
-                        ident=ident,
+                        position=self.scanner.position(),
+                        symbol=sym,
                         exported=exported,
-                        params=params,
                         declarations=decl,
                         body=body,
                     )
@@ -371,12 +417,24 @@ class Parser(BaseModel):
             return p
 
         d = ast.Declarations(
+            position=self.scanner.position(),
             const_declarations=const_declaration(),
-            type_declarations=type_declaration(),
             var_declarations=var_declaration(),
             procedure_declarations=procedure_declaration(),
         )
         return d
+
+    def add_types(self) -> None:
+        self.sym_table.add(types.integer)
+        self.sym_table.add(types.boolean)
+
+    def add_system_calls(self) -> None:
+        self.sym_table.add(systemcalls.OpenInput)
+        self.sym_table.add(systemcalls.ReadInt)
+        self.sym_table.add(systemcalls.eot)
+        self.sym_table.add(systemcalls.WriteChar)
+        self.sym_table.add(systemcalls.WriteInt)
+        self.sym_table.add(systemcalls.WriteLn)
 
     def module(self) -> "ast.Module":
         logger.debug("parsing module")
@@ -387,15 +445,21 @@ class Parser(BaseModel):
         self.scanner.get_next_symbol()
         self.check_sym(Token.SEMICOLON)
         self.scanner.get_next_symbol()
-        d = self.declarations()
+        self.sym_table.new_scope()
+
+        self.add_types()
+        self.add_system_calls()
+
+        d = self.declarations(global_=True)
         if self.scanner.sym == Token.BEGIN:
             self.scanner.get_next_symbol()
             b = self.statement_sequence()
         else:
-            b = ast.StatementSequence(statements=[])
+            b = ast.StatementSequence(position=self.scanner.position(), statements=[])
         self.check_sym(Token.END)
         self.scanner.get_next_symbol()
         self.check_sym(Token.IDENT)
+        self.sym_table.close_scope()
 
         if self.scanner.value != name:
             self.raise_error(f"Expected '{name}', but got '{self.scanner.value}'")
@@ -405,9 +469,11 @@ class Parser(BaseModel):
         self.scanner.get_next_symbol()
         self.check_sym(Token.EOF)
 
-        return ast.Module(ident=name, Declarations=d, body=b)
+        return ast.Module(
+            position=self.scanner.position(), ident=name, declarations=d, body=b
+        )
 
-    def parse(self):
+    def parse(self) -> "ast.Module":
         logger.debug("Parsing")
         ast.actual_scanner = self.scanner
         self.scanner.get_next_symbol()

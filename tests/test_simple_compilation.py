@@ -17,7 +17,7 @@ def compile(src: TextIOBase) -> BytesIO:
     scanner.open(src)
     parser = Parser(scanner=scanner)
     ast = parser.parse()
-    gen = CodeGenerator(ast=ast)
+    gen = CodeGenerator(ast_=ast)
     gen.generate(dst)
     return dst
 

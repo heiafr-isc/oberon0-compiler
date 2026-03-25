@@ -1,39 +1,67 @@
-# SPDX-FileCopyrightText: 2025 Jacques Supcik <jacques.supcik@hefr.ch>
-#
-# SPDX-License-Identifier: Apache-2.0 OR MIT
-#
 [project]
 name = "oberon0-compiler"
 version = "0.1.0"
-description = ""
+description = "Oberon-0 compiler implemented in Python"
 authors = [{ name = "Jacques Supcik", email = "jacques.supcik@hefr.ch" }]
-license = { text = "Apache-2.0 OR MIT" }
+keywords = ["oberon", "compiler", "interpreter"]
 readme = "README.md"
-requires-python = ">=3.12,<4.0"
+requires-python = ">=3.12"
 dependencies = [
-    "pydantic (>=2.10.6,<3.0.0)",
-    "click (>=8.1.8,<9.0.0)",
+    "loguru>=0.7.3",
+    "rich>=14.3.2",
+    "typer>=0.21.2",
     "wasm-gen @ git+https://github.com/heiafr-isc/wasm-gen-py.git",
-    "pydantic-core (>=2.29.0,<3.0.0)",
-    "devtools (>=0.12.2,<0.13.0)",
-    "loguru (>=0.7.3,<0.8.0)",
-    "rich (>=13.9.4,<14.0.0)"
+]
+
+[dependency-groups]
+dev = [
+    "black>=26.1.0",
+    "bump-my-version>=1.2.7",
+    "furo>=2025.12.19",
+    "mypy>=1.19.1",
+    "pre-commit>=4.5.1",
+    "pyright>=1.1.408",
+    "pytest>=9.0.2",
+    "ruff>=0.15.0",
+    "sphinx>=9.1.0",
+    "sphinx-design>=0.7.0",
+    "sphinxcontrib-napoleon>=0.7",
+    "sphinxcontrib-typer>=0.8.0",
 ]
 
 [build-system]
-requires = ["poetry-core>=2.0.0,<3.0.0"]
-build-backend = "poetry.core.masonry.api"
+requires = ["uv_build>=0.10.1,<0.11.0"]
+build-backend = "uv_build"
 
-[tool.poetry.group.dev.dependencies]
-black = "^25.1.0"
-ruff = "^0.9.6"
-pydantic-2-mermaid = "^0.7.3"
+[tool.ruff.lint]
+select = ["E", "F", "B", "I"]
 
-[tool.poetry.group.test.dependencies]
-pytest = "^8.3.4"
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
 
 [project.scripts]
 oberon0-compiler = 'oberon0_compiler:app'
 
-[tool.ruff.lint]
-select = ["E", "F", "B", "Q", "N", "I", "UP", "PL", "RUF", "C90"]
+[tool.bumpversion]
+current_version = "0.1.0"
+parse = "(?P<major>\\d+)\\.(?P<minor>\\d+)\\.(?P<patch>\\d+)"
+serialize = ["{major}.{minor}.{patch}"]
+search = "{current_version}"
+replace = "{new_version}"
+regex = false
+ignore_missing_version = false
+tag = true
+sign_tags = false
+tag_name = "v{new_version}"
+tag_message = "Bump version: {current_version} → {new_version}"
+allow_dirty = false
+commit = true
+message = "Bump version: {current_version} → {new_version}"
+commit_args = ""
+pre_commit_hooks = ["uv sync", "git add uv.lock"]
+
+[[tool.bumpversion.files]]
+filename = "docs/conf.py"
+search = "release = \"{current_version}\""
+replace = "release = \"{new_version}\""
