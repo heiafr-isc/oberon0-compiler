@@ -1,6 +1,6 @@
-# SPDX-FileCopyrightText: 2025 Jacques Supcik <jacques.supcik@hefr.ch>
+# SPDX-FileCopyrightText: 2026 Jacques Supcik <jacques.supcik@hefr.ch>
 #
-# SPDX-License-Identifier: Apache-2.0 OR MIT
+# SPDX-License-Identifier: MIT
 
 """
 Oberon-0 parser
@@ -14,34 +14,85 @@ from loguru import logger
 
 from . import ast, systemcalls, types
 from . import sym_table as SYM
-from .scanner import Scanner
+from .scanner import Position, Scanner
 from .token import Token
 
 
-def evaluate(expr: "ast.Expression") -> int:
+class ParserError(Exception):
+    def __init__(self, message: str, position: Position) -> None:
+        super().__init__(message)
+        self.position = position
+
+    def __str__(self) -> str:
+        p = self.position
+        return (
+            f"{self.args[0]} (File {p.file_name}, Line {p.line_no}, Column {p.col_no})"
+        )
+
+
+def eval_const(expr: ast.Node) -> int:
     if isinstance(expr, ast.Number):
         return expr.value
+    elif isinstance(expr, ast.ConstantDeclaration):
+        return expr.symbol.value
+    elif isinstance(expr, ast.SimpleExpression):
+        x: int = eval_const(expr.term)
+        for op, t in expr.addop_terms:
+            y: int = eval_const(t)
+            if op == "+":
+                x += y
+            elif op == "-":
+                x -= y
+            else:
+                raise ParserError(
+                    f"Invalid operator '{op}' in constant expression",
+                    expr.position,
+                )
+        if expr.sign == "-":
+            x = -x
+        return x
+    elif isinstance(expr, ast.Term):
+        x: int = eval_const(expr.factor)
+        for op, f in expr.mulop_factors:
+            y: int = eval_const(f)
+            if op == "*":
+                x *= y
+            elif op == "DIV":
+                x //= y
+            elif op == "MOD":
+                x %= y
+            else:
+                raise ParserError(
+                    f"Invalid operator '{op}' in constant expression", expr.position
+                )
+        return x
+    elif isinstance(expr, ast.Ident):
+        if isinstance(expr.symbol, SYM.Constant):
+            return expr.symbol.value
+        else:
+            raise ParserError(
+                f"Expected constant, but got '{expr.symbol}'", expr.position
+            )
+
     else:
-        raise ValueError("Not yet implemented")
+        raise ParserError(f"{type(expr)} Not yet implemented", expr.position)
 
 
 @dataclass
 class Parser:
 
     scanner: Scanner
-    has_error: bool = False
     sym_table: SYM.SymbolTable = field(default_factory=SYM.SymbolTable)
-
-    def raise_error(self, msg: str) -> None:
-        self.has_error = True
-        self.scanner.raise_error(msg)
 
     @typing.no_type_check
     def check_sym(self, expected: Token):
         if self.scanner.sym != expected:
-            self.raise_error(f"Expected '{expected}', but got '{self.scanner.sym}'")
+            raise ParserError(
+                f"Expected '{expected}', but got '{self.scanner.sym}'",
+                self.scanner.position(),
+            )
 
-    def factor(self) -> "ast.Factor":
+    def factor(self) -> ast.Factor:
         logger.debug("parsing factor")
         if self.scanner.sym == Token.IDENT:
             ident = self.scanner.value
@@ -63,7 +114,8 @@ class Parser:
                 return ast.FunctionCall(
                     position=self.scanner.position(), symbol=sym, params=params
                 )
-            return ast.SimpleFactor(position=self.scanner.position(), symbol=sym)
+            assert isinstance(sym, SYM.Variable) or isinstance(sym, SYM.Constant)
+            return ast.Ident(position=self.scanner.position(), symbol=sym)
         elif self.scanner.sym == Token.NUMBER:
             value = self.scanner.value
             self.scanner.get_next_symbol()
@@ -78,10 +130,13 @@ class Parser:
             self.scanner.get_next_symbol()
             return ast.Negation(position=self.scanner.position(), factor=self.factor())
         else:
-            self.raise_error(f"Expected factor, but got '{self.scanner.sym}'")
+            raise ParserError(
+                f"Expected factor, but got '{self.scanner.sym}'",
+                self.scanner.position(),
+            )
             return ast.Factor(position=self.scanner.position())
 
-    def term(self) -> "ast.Term":
+    def term(self) -> ast.Term:
         logger.debug("parsing term")
         f = self.factor()
         m = []
@@ -91,7 +146,7 @@ class Parser:
             m.append((op, self.factor()))
         return ast.Term(position=self.scanner.position(), factor=f, mulop_factors=m)
 
-    def expression(self) -> "ast.Expression":
+    def expression(self) -> ast.Expression:
         logger.debug("parsing expression")
 
         def simple_expression() -> ast.SimpleExpression:
@@ -131,7 +186,7 @@ class Parser:
             )
         return e
 
-    def statement_sequence(self) -> "ast.StatementSequence":
+    def statement_sequence(self) -> ast.StatementSequence:
         logger.debug("parsing statement_sequence")
         s = [self.statement()]
         while self.scanner.sym == Token.SEMICOLON:
@@ -139,7 +194,7 @@ class Parser:
             s.append(self.statement())
         return ast.StatementSequence(position=self.scanner.position(), statements=s)
 
-    def statement(self) -> "ast.Statement":  # noqa: C901 PLR0915
+    def statement(self) -> ast.Statement:  # noqa: C901 PLR0915
         logger.debug("parsing statement")
 
         def assignment_or_procedure_call() -> ast.Statement:
@@ -250,19 +305,21 @@ class Parser:
             self.scanner.get_next_symbol()
         return idents
 
-    def type_(self) -> "ast.Type":
+    def type_(self) -> ast.Type:
         logger.debug("parsing type")
         if self.scanner.sym == Token.IDENT:
             ident = self.sym_table.get(self.scanner.value)
             self.scanner.get_next_symbol()
             return ast.NamedType(position=self.scanner.position(), ident=ident)
         else:
-            self.raise_error(f"Expected type, but got '{self.scanner.sym}'")
+            raise ParserError(
+                f"Expected type, but got '{self.scanner.sym}'", self.scanner.position()
+            )
             return ast.Type(position=self.scanner.position())
 
     def declarations(
         self, global_: bool = False
-    ) -> "ast.Declarations":  # noqa: C901 PLR0915
+    ) -> ast.Declarations:  # noqa: C901 PLR0915
         logger.debug("parsing declarations")
 
         def const_declaration() -> list[ast.ConstantDeclaration]:
@@ -275,7 +332,11 @@ class Parser:
                     self.scanner.get_next_symbol()
                     self.check_sym(Token.EQL)
                     self.scanner.get_next_symbol()
-                    sym = SYM.Constant(name=ident, value=evaluate(self.expression()))
+                    sym = SYM.Constant(
+                        name=ident,
+                        type_=types.integer,
+                        value=eval_const(self.expression()),
+                    )
                     self.sym_table.add(sym)
                     c.append(
                         ast.ConstantDeclaration(
@@ -392,7 +453,10 @@ class Parser:
                 self.scanner.get_next_symbol()
                 decl, body, end_ident = procedure_body()
                 if ident != end_ident:
-                    self.raise_error(f"Expected '{ident}', but got '{end_ident}'")
+                    raise ParserError(
+                        f"Expected '{ident}', but got '{end_ident}'",
+                        self.scanner.position(),
+                    )
                 # Compute stack size for local variables
                 stack_size = sum(
                     i.type_.size
@@ -436,7 +500,7 @@ class Parser:
         self.sym_table.add(systemcalls.WriteInt)
         self.sym_table.add(systemcalls.WriteLn)
 
-    def module(self) -> "ast.Module":
+    def module(self) -> ast.Module:
         logger.debug("parsing module")
         self.check_sym(Token.MODULE)
         self.scanner.get_next_symbol()
@@ -462,7 +526,10 @@ class Parser:
         self.sym_table.close_scope()
 
         if self.scanner.value != name:
-            self.raise_error(f"Expected '{name}', but got '{self.scanner.value}'")
+            raise ParserError(
+                f"Expected '{name}', but got '{self.scanner.value}'",
+                self.scanner.position(),
+            )
 
         self.scanner.get_next_symbol()
         self.check_sym(Token.PERIOD)
@@ -473,7 +540,7 @@ class Parser:
             position=self.scanner.position(), ident=name, declarations=d, body=b
         )
 
-    def parse(self) -> "ast.Module":
+    def parse(self) -> ast.Module:
         logger.debug("Parsing")
         ast.actual_scanner = self.scanner
         self.scanner.get_next_symbol()

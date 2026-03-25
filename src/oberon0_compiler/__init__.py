@@ -1,6 +1,6 @@
-# SPDX-FileCopyrightText: 2025 Jacques Supcik <jacques.supcik@hefr.ch>
+# SPDX-FileCopyrightText: 2026 Jacques Supcik <jacques.supcik@hefr.ch>
 #
-# SPDX-License-Identifier: Apache-2.0 OR MIT
+# SPDX-License-Identifier: MIT
 
 """
 Oberon-0 compiler
@@ -19,6 +19,7 @@ from rich.pretty import Pretty
 from .code_gen import CodeGenerator
 from .parser import Parser
 from .scanner import Scanner
+from .type_checker import TypeChecker
 
 console = Console()
 app = typer.Typer()
@@ -38,10 +39,8 @@ def version_callback(value: bool) -> None:
 
 @app.command(context_settings={"ignore_unknown_options": False})
 def main(  # noqa: PLR0913
-    source: Annotated[
-        typer.FileText, typer.Argument(help="Oberon-0 source file (.mod)")
-    ],
-    destination: Annotated[typer.FileBinaryWrite | None, typer.Argument()] = None,
+    source: Annotated[Path, typer.Argument(help="Oberon-0 source file (.mod)")],
+    destination: Annotated[Path | None, typer.Argument()] = None,
     version: Annotated[
         bool | None,
         typer.Option("--version", callback=version_callback, is_eager=True),
@@ -70,31 +69,40 @@ def main(  # noqa: PLR0913
     logger.add(sys.stdout, filter=level_per_module, level=0)
 
     scanner = Scanner()
-    scanner.open(source)
+    try:
+        f = source.open("r")
+        scanner.open(f)
+    except OSError as e:
+        logger.error(f"Cannot open source file {source}: {e}")
+        raise typer.Exit(code=1) from e
+
     parser = Parser(scanner=scanner)
 
     ast_ = None
     try:
         ast_ = parser.parse()
-    except SyntaxError as e:
-        print(f"{e.msg} (File {e.filename}, Line {e.lineno}, Column {e.offset})")
-
-    if parser.has_error:
-        print("Syntax errors. aborting")
-        raise typer.Exit(code=1)
+    except Exception as e:
+        logger.error(f"Parsing failed: {e}")
+        raise typer.Exit(code=1) from e
 
     assert ast_ is not None
     if show_tree:
         console.print(Panel(Pretty(ast_, indent_size=2), title="Syntax Tree"))
 
+    checker = TypeChecker()
+    try:
+        checker.check(ast_)
+    except Exception as e:
+        logger.error(f"Type checking failed: {e}")
+        raise typer.Exit(code=1) from e
+
     gen = CodeGenerator()
 
     if destination is None:
-        destination_path = Path(source.name).with_suffix(".wasm")
-        with destination_path.open("wb") as destination_file:
-            gen.generate(ast_, destination_file)
-    else:
-        gen.generate(ast_, destination)
+        destination = Path(source.name).with_suffix(".wasm")
+
+    with destination.open("wb") as f:
+        gen.generate(ast_, f)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
-# SPDX-FileCopyrightText: 2025 Jacques Supcik <jacques.supcik@hefr.ch>
+# SPDX-FileCopyrightText: 2026 Jacques Supcik <jacques.supcik@hefr.ch>
 #
-# SPDX-License-Identifier: Apache-2.0 OR MIT
+# SPDX-License-Identifier: MIT
 
 """
 Oberon-2 Symbol Table
@@ -45,7 +45,7 @@ class FormalParameter(Variable):
 
 
 @dataclass
-class Constant(Symbol):
+class Constant(Variable):
     value: int
 
 
@@ -69,9 +69,10 @@ class Scope:
     symbols: dict[str, Symbol] = field(default_factory=dict)
 
     def add(self, symbol: Symbol) -> None:
-        assert (
-            symbol.name not in self.symbols
-        ), f"Symbol {symbol.name} already defined in scope {self.level}"
+        if symbol.name in self.symbols:
+            raise KeyError(
+                f"Symbol {symbol.name} already defined in scope {self.level}"
+            )
         self.symbols[symbol.name] = symbol
 
     def find(self, name: str, class_: type) -> Symbol | None:
@@ -100,7 +101,8 @@ class SymbolTable:
         self.scopes.append(Scope(level=level))
 
     def close_scope(self) -> None:
-        assert len(self.scopes) > 0
+        if len(self.scopes) == 0:
+            raise IndexError("No scope to close")
         logger.debug(f"Closing scope at level {self.current_level()}")
         for s in self.scopes[-1].symbols.values():
             logger.debug(f"> {s}")
@@ -133,12 +135,13 @@ class SymbolTable:
     ) -> Symbol:
         s = self.find(name, class_, min_level, max_level)
         if s is None:
-            raise Exception(f"Symbol {name} not found")
+            raise LookupError(f"Symbol {name} not found")
         return s
 
     def type_(
         self, name: str, min_level: int = 0, max_level: int | None = None
     ) -> Type:
         s = self.get(name, class_=Type, min_level=min_level, max_level=max_level)
-        assert isinstance(s, Type)
+        if not isinstance(s, Type):
+            raise TypeError(f"Symbol {name} is not a type")
         return s

@@ -1,6 +1,6 @@
-# SPDX-FileCopyrightText: 2025 Jacques Supcik <jacques.supcik@hefr.ch>
+# SPDX-FileCopyrightText: 2026 Jacques Supcik <jacques.supcik@hefr.ch>
 #
-# SPDX-License-Identifier: Apache-2.0 OR MIT
+# SPDX-License-Identifier: MIT
 
 """
 Oberon-0 scanner
@@ -21,6 +21,18 @@ class Position:
     file_name: str
     line_no: int
     col_no: int
+
+
+class ScannerError(Exception):
+    def __init__(self, message: str, position: Position) -> None:
+        super().__init__(message)
+        self.position = position
+
+    def __str__(self) -> str:
+        p = self.position
+        return (
+            f"{self.args[0]} (File {p.file_name}, Line {p.line_no}, Column {p.col_no})"
+        )
 
 
 # @typing.no_type_check
@@ -58,11 +70,6 @@ class Scanner:
             col_no=self.col_no,
         )
 
-    def raise_error(self, msg: str) -> None:
-        p = self.position()
-        logger.error(f"{p.file_name}:{p.line_no}:{p.col_no}: {msg}")
-        raise Exception(msg)
-
     def skip_space(self) -> None:
         while self._ch.isspace():
             self.get_next_char()
@@ -71,8 +78,7 @@ class Scanner:
         while True:
             self.get_next_char()
             if self.eof:
-                self.raise_error("Unterminated comment")
-                return
+                raise ScannerError("Unterminated comment", self.position())
             if self._ch == "(":
                 self.get_next_char()
                 if self._ch == "*":
@@ -117,8 +123,7 @@ class Scanner:
                 prev_value = value
                 self.get_next_char()
             if prev_token is None:
-                self.raise_error(f"Unknown symbol '{value}'")
-                return (Token.OTHER, value)
+                raise ScannerError(f"Unknown symbol '{value}'", self.position())
             else:
                 assert prev_value is not None
                 return (prev_token, prev_value)

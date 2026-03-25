@@ -1,6 +1,6 @@
-# SPDX-FileCopyrightText: 2025 Jacques Supcik <jacques.supcik@hefr.ch>
+# SPDX-FileCopyrightText: 2026 Jacques Supcik <jacques.supcik@hefr.ch>
 #
-# SPDX-License-Identifier: Apache-2.0 OR MIT
+# SPDX-License-Identifier: MIT
 
 """
 Oberon-2 WASM Code Generator
@@ -16,8 +16,9 @@ from rich.console import Console
 from wasm_gen import instructions as I  # noqa
 from wasm_gen.type import i32_t
 
-from . import ast, types
+from . import ast
 from . import sym_table as SYM
+from .scanner import Position
 
 console = Console()
 
@@ -50,11 +51,15 @@ system_calls = [
 
 
 class CodeGenError(Exception):
-    def __init__(self, message: str, file_name: str, line_no: int, col_no: int) -> None:
+    def __init__(self, message: str, position: Position) -> None:
         super().__init__(message)
-        self.file_name = file_name
-        self.line_no = line_no
-        self.col_no = col_no
+        self.position = position
+
+    def __str__(self) -> str:
+        p = self.position
+        return (
+            f"{self.args[0]} (File {p.file_name}, Line {p.line_no}, Column {p.col_no})"
+        )
 
 
 @dataclass
@@ -63,14 +68,9 @@ class CodeGenerator:
     _sp: W.BaseGlobal | None = None
     _current_function: list[W.Function] = field(default_factory=list)
 
-    def check(self, node: ast.Node, condition: bool, message: str) -> None:
+    def ensure(self, node: ast.Node, condition: bool, message: str) -> None:
         if not condition:
-            raise CodeGenError(
-                message,
-                node.position.file_name,
-                node.position.line_no,
-                node.position.col_no,
-            )
+            raise CodeGenError(message, node.position)
 
     def current_function(self) -> W.Function:
         assert len(self._current_function) > 0
@@ -118,49 +118,45 @@ class CodeGenerator:
                 ]
             )
         elif isinstance(sym, SYM.FormalParameter):
-            self.check(node, sym.by_ref, "Symbol must be by reference")
+            self.ensure(node, sym.by_ref, "Symbol must be by reference")
             fn.body.extend(
                 [
                     I.LocalGet(localidx=sym.index),
                 ]
             )
         else:
-            raise Exception(f"Unknown instance of symbol: {sym} (NOT YET IMPLEMENTED)")
+            raise CodeGenError(
+                f"Unknown instance of symbol: {sym} (NOT YET IMPLEMENTED)",
+                node.position,
+            )
 
     def addr_of_expr(self, expr: ast.Expression) -> None:
-        self.check(expr, isinstance(expr, ast.SimpleExpression), "Expression expected")
+        self.ensure(expr, isinstance(expr, ast.SimpleExpression), "Expression expected")
         assert isinstance(expr, ast.SimpleExpression)
-        self.check(expr, expr.sign is None, "Sign not allowed")
-        self.check(
+        self.ensure(expr, expr.sign is None, "Sign not allowed")
+        self.ensure(
             expr,
-            isinstance(expr.term.factor, ast.SimpleFactor),
+            isinstance(expr.term.factor, ast.Ident),
             "Simple factor expected",
         )
-        assert isinstance(expr.term.factor, ast.SimpleFactor)
-        self.check(expr, len(expr.term.mulop_factors) == 0, "No mulop factors allowed")
-        self.check(expr, len(expr.addop_terms) == 0, "No addop terms allowed")
+        assert isinstance(expr.term.factor, ast.Ident)
+        self.ensure(expr, len(expr.term.mulop_factors) == 0, "No mulop factors allowed")
+        self.ensure(expr, len(expr.addop_terms) == 0, "No addop terms allowed")
 
         self.addr_of_symbol(expr, expr.term.factor.symbol)
 
-    def function_call(self, f: ast.FunctionCall) -> SYM.Type | None:
+    def function_call(self, f: ast.FunctionCall) -> None:
         s = f.symbol
-        self.check(f, isinstance(s, SYM.SystemCall), "Only system calls allowed")
+        self.ensure(f, isinstance(s, SYM.SystemCall), "Only system calls allowed")
         assert isinstance(s, SYM.SystemCall)
-        self.check(
-            f,
-            s.return_type is not None and s.return_type.index == 0,
-            "Return type must be INTEGER",
-        )
         self.system_call(f, s)
-        return s.return_type
 
-    def factor(self, f: ast.Factor) -> SYM.Type | None:
+    def factor(self, f: ast.Factor) -> None:
         assert self.code is not None and self._sp is not None
         if isinstance(f, ast.Number):
             logger.debug(f"Number: {f.value}")
             self.current_function().body.append(I.I32Const(value=f.value))
-            return types.integer
-        elif isinstance(f, ast.SimpleFactor):
+        elif isinstance(f, ast.Ident):
             sym = f.symbol
             if isinstance(sym, SYM.LocalVariable):
                 self.current_function().body.extend(
@@ -192,137 +188,94 @@ class CodeGenerator:
                             I.LocalGet(localidx=sym.index),
                         ]
                     )
+            elif isinstance(sym, SYM.Constant):
+                self.current_function().body.append(I.I32Const(value=sym.value))
             else:
-                raise Exception(f"Unknown symbol: {sym}")
-
-            return sym.type_
+                raise CodeGenError(f"Unknown symbol: {sym}", f.position)
 
         elif isinstance(f, ast.FunctionCall):
-            return self.function_call(f)
+            self.function_call(f)
         elif isinstance(f, ast.ExpressionFactor):
-            return self.expression(f.expression)
+            self.expression(f.expression)
         elif isinstance(f, ast.Negation):
             fn = self.current_function()
-            t = self.factor(f.factor)
+            self.factor(f.factor)
             fn.body.append(I.I32Const(value=0))
             fn.body.append(I.I32Eq())
-            return t
         else:
-            raise Exception(f"Unknown factor: {f}")
+            raise CodeGenError(f"Unknown factor: {f}", f.position)
 
-    def term(self, t: ast.Term) -> SYM.Type:
-        f1_type = self.factor(t.factor)
-        assert f1_type is not None
+    def term(self, t: ast.Term) -> None:
+        self.factor(t.factor)
         fn = self.current_function()
         for op, f in t.mulop_factors:
-            f2_type = self.factor(f)
-            self.check(t, f1_type == f2_type, "Type mismatch")
+            self.factor(f)
             if op == "*":
-                self.check(
-                    t, f1_type == types.integer, "Type mismatch : expected INTEGER"
-                )
                 fn.body.append(I.I32Mul())
             elif op == "DIV":
-                self.check(
-                    t, f1_type == types.integer, "Type mismatch : expected INTEGER"
-                )
                 fn.body.append(I.I32DivS())
             elif op == "MOD":
-                self.check(
-                    t, f1_type == types.integer, "Type mismatch : expected INTEGER"
-                )
                 fn.body.append(I.I32RemS())
             elif op == "&":
-                self.check(
-                    t, f1_type == types.boolean, "Type mismatch : expected BOOLEAN"
-                )
                 fn.body.append(I.I32And())
             else:
-                raise Exception(f"Unknown mulop: {op}")
+                raise CodeGenError(f"Unknown mulop: {op}", t.position)
 
-        return f1_type
-
-    def simple_expression(self, expr: ast.SimpleExpression) -> SYM.Type:
+    def simple_expression(self, expr: ast.SimpleExpression) -> None:
         fn = self.current_function()
 
         if expr.sign == "-":
             fn.body.append(I.I32Const(value=0))
-            t1_type = self.term(expr.term)
-            self.check(expr, t1_type == types.integer, "Type mismatch")
+            self.term(expr.term)
             fn.body.append(I.I32Sub())
         else:
-            t1_type = self.term(expr.term)
+            self.term(expr.term)
 
         for op, t in expr.addop_terms:
-            t2_type = self.term(t)
-            self.check(expr, t1_type == t2_type, "Type mismatch")
+            self.term(t)
             if op == "+":
-                self.check(
-                    expr, t1_type == types.integer, "Type mismatch : expected INTEGER"
-                )
                 fn.body.append(I.I32Add())
             elif op == "-":
-                self.check(
-                    expr, t1_type == types.integer, "Type mismatch : expected INTEGER"
-                )
                 fn.body.append(I.I32Sub())
             elif op == "OR":
-                self.check(
-                    expr, t1_type == types.boolean, "Type mismatch : expected BOOLEAN"
-                )
                 fn.body.append(I.I32Or())
             else:
-                raise Exception(f"Unknown addop: {op}")
-        return t1_type
+                raise CodeGenError(f"Unknown addop: {op}", expr.position)
 
-    def complex_expression(self, expr: ast.ComplexExpression) -> SYM.Type:
-        e1_type = self.simple_expression(expr.simple_expression)
+    def complex_expression(self, expr: ast.ComplexExpression) -> None:
+        self.simple_expression(expr.simple_expression)
         if expr.relation is None:
-            return e1_type
+            return
 
         fn = self.current_function()
-        e2_type = self.simple_expression(expr.relation[1])
-        self.check(expr, e1_type == e2_type, "Type mismatch")
+        self.simple_expression(expr.relation[1])
         if expr.relation[0] == "=":
             fn.body.append(I.I32Eq())
         elif expr.relation[0] == "#":
             fn.body.append(I.I32Ne())
         elif expr.relation[0] == "<":
-            self.check(
-                expr, e1_type == types.integer, "Type mismatch : expected INTEGER"
-            )
             fn.body.append(I.I32LtS())
         elif expr.relation[0] == "<=":
-            self.check(
-                expr, e1_type == types.integer, "Type mismatch : expected INTEGER"
-            )
             fn.body.append(I.I32LeS())
         elif expr.relation[0] == ">":
-            self.check(
-                expr, e1_type == types.integer, "Type mismatch : expected INTEGER"
-            )
             fn.body.append(I.I32GtS())
         elif expr.relation[0] == ">=":
-            self.check(
-                expr, e1_type == types.integer, "Type mismatch : expected INTEGER"
-            )
             fn.body.append(I.I32GeS())
         else:
-            raise Exception(f"Unknown relation: {expr.relation[0]}")
-        return types.boolean
+            raise CodeGenError(f"Unknown relation: {expr.relation[0]}", expr.position)
 
-    def expression(self, expr: ast.Expression) -> SYM.Type:
+    def expression(self, expr: ast.Expression) -> None:
         if isinstance(expr, ast.SimpleExpression):
-            return self.simple_expression(expr)
+            self.simple_expression(expr)
         elif isinstance(expr, ast.ComplexExpression):
-            return self.complex_expression(expr)
+            self.complex_expression(expr)
         else:
-            raise Exception(f"Unknown expression: {expr}")
+            raise CodeGenError(f"Unknown expression: {expr}", expr.position)
 
     def assignment(self, a: ast.Assignment) -> None:
         fn = self.current_function()
         sym = a.symbol
-        self.check(a, sym is not None, f"Unknown symbol: {sym}")
+        self.ensure(a, sym is not None, f"Unknown symbol: {sym}")
         assert sym is not None
         self.addr_of_symbol(a, sym)
         self.expression(a.expression)
@@ -336,7 +289,7 @@ class CodeGenerator:
         self, p: ast.FunctionCall | ast.ProcedureCall, s: SYM.SystemCall
     ) -> None:
         logger.debug(f"System call: {p.symbol.name}")
-        self.check(p, len(p.params) == len(s.params), "Wrong number of arguments")
+        self.ensure(p, len(p.params) == len(s.params), "Wrong number of arguments")
         for i, a in enumerate(p.params):
             # TODO: check type
             if s.params[i].by_ref:
@@ -409,7 +362,7 @@ class CodeGenerator:
             elif isinstance(s, ast.If):
                 self.if_statement(s)
             else:
-                raise Exception(f"Unknown statement: {s}")
+                raise CodeGenError(f"Unknown statement: {s}", s.position)
 
     def procedure_call(self, p: ast.ProcedureCall) -> None:
         s = p.symbol
@@ -419,7 +372,7 @@ class CodeGenerator:
     def procedure(self, p: ast.ProcedureDeclaration) -> None:
         assert self.code is not None and self._sp is not None
         if p.exported:
-            self.check(
+            self.ensure(
                 p,
                 len(p.symbol.params) == 0,
                 "Exported procedures cannot have parameters",
@@ -462,7 +415,7 @@ class CodeGenerator:
 
     def generate(self, ast_: ast.Module, io: BinaryIO) -> None:
 
-        self.check(ast_, isinstance(ast_, ast.Module), "Module expected")
+        self.ensure(ast_, isinstance(ast_, ast.Module), "Module expected")
         self.code = W.Module()
 
         self.add_syscalls()

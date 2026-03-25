@@ -1,6 +1,6 @@
-# SPDX-FileCopyrightText: 2025 Jacques Supcik <jacques.supcik@hefr.ch>
+# SPDX-FileCopyrightText: 2026 Jacques Supcik <jacques.supcik@hefr.ch>
 #
-# SPDX-License-Identifier: Apache-2.0 OR MIT
+# SPDX-License-Identifier: MIT
 
 from io import BytesIO, TextIOBase
 from pathlib import Path
@@ -17,8 +17,8 @@ def compile(src: TextIOBase) -> BytesIO:
     scanner.open(src)
     parser = Parser(scanner=scanner)
     ast = parser.parse()
-    gen = CodeGenerator(ast_=ast)
-    gen.generate(dst)
+    gen = CodeGenerator()
+    gen.generate(ast, dst)
     return dst
 
 
