@@ -28,7 +28,7 @@ app = typer.Typer()
 FilterDict: TypeAlias = dict[str | None, str | int | bool]
 
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 
 def version_callback(value: bool) -> None:

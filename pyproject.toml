@@ -65,3 +65,8 @@ pre_commit_hooks = ["uv sync", "git add uv.lock"]
 filename = "docs/conf.py"
 search = "release = \"{current_version}\""
 replace = "release = \"{new_version}\""
+
+[[tool.bumpversion.files]]
+filename = "src/oberon0_compiler/__init__.py"
+search = "__version__ = \"{current_version}\""
+replace = "__version__ = \"{new_version}\""
