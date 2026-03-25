@@ -8,3 +8,4 @@
 /test/*/site
 __pycache__
 *.wasm
+/public
