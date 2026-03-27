@@ -473,7 +473,6 @@ class Parser:
                     ast.ProcedureDeclaration(
                         position=self.scanner.position(),
                         symbol=sym,
-                        exported=exported,
                         declarations=decl,
                         body=body,
                     )

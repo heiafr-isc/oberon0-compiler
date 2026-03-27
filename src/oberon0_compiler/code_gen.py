@@ -370,7 +370,7 @@ class CodeGenerator:
 
     def procedure(self, p: ast.ProcedureDeclaration) -> None:
         assert self.code is not None and self._sp is not None
-        if p.exported:
+        if p.symbol.exported:
             self.ensure(
                 p,
                 len(p.symbol.params) == 0,
@@ -407,7 +407,7 @@ class CodeGenerator:
 
         f.body.append(I.End())
         self.code.funcs.append(f)
-        if p.exported:
+        if p.symbol.exported:
             self.code.exports.append(W.Export(node=f, name=p.symbol.name))
 
         self._current_function.pop()

@@ -79,12 +79,11 @@ class StatementSequence(Node):
 @dataclass
 class ProcedureDeclaration(Node):
     symbol: SYM.ProcedureDefinition
-    exported: bool
     declarations: Declarations
     body: StatementSequence
 
     def __str__(self) -> str:
-        e = "*" if self.exported else ""
+        e = "*" if self.symbol.exported else ""
         fp = (
             f"({', '.join(str(p) for p in self.symbol.params)})"
             if self.symbol.params
