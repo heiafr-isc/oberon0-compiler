@@ -39,7 +39,7 @@ class ScannerError(Exception):
 @dataclass
 class Scanner:
     eof: bool = False
-    sym: Enum | None = None  # Next Symbol
+    token: Enum | None = None  # Next Token
     value: str = ""
     file_name: Path | None = None
     line_no: int = 0
@@ -50,7 +50,7 @@ class Scanner:
     _text_line: str = ""
 
     _keyword = {str(i): i for i in Token if str(i).isupper()}
-    _symbol = {
+    _special = {
         str(i): i for i in Token if not str(i).isupper() and not str(i).islower()
     }
 
@@ -108,22 +108,22 @@ class Scanner:
             self._text_line = self._text_line[1:]
             self.col_no += 1
 
-    def get_next_symbol(self) -> None:  # noqa: C901
+    def get_next_token(self) -> None:  # noqa: C901
 
-        def token() -> tuple[Enum, str]:
+        def special_char_token() -> tuple[Enum, str]:
             prev_token = None
             prev_value = None
             value = ""
             while not self.eof:
                 value += self._ch
-                t = self._symbol.get(value, None)
+                t = self._special.get(value, None)
                 if t is None:
                     break
                 prev_token = t
                 prev_value = value
                 self.get_next_char()
             if prev_token is None:
-                raise ScannerError(f"Unknown symbol '{value}'", self.position())
+                raise ScannerError(f"Unknown token '{value}'", self.position())
             else:
                 assert prev_value is not None
                 return (prev_token, prev_value)
@@ -131,7 +131,7 @@ class Scanner:
         while True:
             self.skip_space()
             if self.eof:
-                self.sym = Token.EOF
+                self.token = Token.EOF
             elif self._ch.isalpha():
                 self.value = self._ch
                 self.get_next_char()
@@ -139,23 +139,23 @@ class Scanner:
                     self.value += self._ch
                     self.get_next_char()
                 if (kw := self.value) in self._keyword:
-                    self.sym = self._keyword[kw]
+                    self.token = self._keyword[kw]
                 else:
-                    self.sym = Token.IDENT
+                    self.token = Token.IDENT
             elif self._ch.isdigit():
                 self.value = self._ch
                 self.get_next_char()
                 while self._ch.isdigit():
                     self.value += self._ch
                     self.get_next_char()
-                self.sym = Token.NUMBER
+                self.token = Token.NUMBER
             else:
-                self.sym, self.value = token()
-                if (self.sym == Token.LPAREN) and (self._ch == "*"):
+                self.token, self.value = special_char_token()
+                if (self.token == Token.LPAREN) and (self._ch == "*"):
                     self.get_next_char()
                     logger.debug("Skipping comment")
                     self.skip_comment()
-                    self.sym = None
-            if self.sym is not None:
-                logger.debug(f"Symbol: {self.sym} Value: {self.value}")
+                    self.token = None
+            if self.token is not None:
+                logger.debug(f"Symbol: {self.token} Value: {self.value}")
                 break
