@@ -40,7 +40,6 @@ class GlobalVariable(Variable):
 
 @dataclass
 class FormalParameter(Variable):
-    index: int
     by_ref: bool
 
 

@@ -19,24 +19,20 @@ system_calls = [
             ("OpenInput", [], None),
             (
                 "ReadInt",
-                [SYM.FormalParameter(name="var", index=-1, type_=integer, by_ref=True)],
+                [SYM.FormalParameter(name="var", type_=integer, by_ref=True)],
                 None,
             ),
             ("eot", [], integer),
             (
                 "WriteChar",
-                [SYM.FormalParameter(name="c", index=-1, type_=integer, by_ref=False)],
+                [SYM.FormalParameter(name="c", type_=integer, by_ref=False)],
                 None,
             ),
             (
                 "WriteInt",
                 [
-                    SYM.FormalParameter(
-                        name="n", index=-1, type_=integer, by_ref=False
-                    ),
-                    SYM.FormalParameter(
-                        name="w", index=-1, type_=integer, by_ref=False
-                    ),
+                    SYM.FormalParameter(name="n", type_=integer, by_ref=False),
+                    SYM.FormalParameter(name="w", type_=integer, by_ref=False),
                 ],
                 None,
             ),

@@ -392,9 +392,7 @@ class Parser:
                 type_ = self.sym_table.type_(self.scanner.value)
                 res = []
                 for index, i in enumerate(fp_idents):
-                    sym = SYM.FormalParameter(
-                        name=i, type_=type_, index=index, by_ref=by_ref
-                    )
+                    sym = SYM.FormalParameter(name=i, type_=type_, by_ref=by_ref)
                     self.sym_table.add(sym)
                     res.append(sym)
 
