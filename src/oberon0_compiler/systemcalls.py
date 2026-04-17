@@ -7,7 +7,8 @@ Oberon-0 System Calls
 """
 
 # Note : The index of a formal parameter of a system call is not
-# neeeded by the code generator, so we set it to -1.
+# neeeded by the code generator. We keep it for consistency with
+# the procedure definitions, but it is not used anywhere.
 
 from . import sym_table as SYM
 from .types import integer
@@ -19,20 +20,20 @@ system_calls = [
             ("OpenInput", [], None),
             (
                 "ReadInt",
-                [SYM.FormalParameter(name="var", type_=integer, by_ref=True)],
+                [SYM.FormalParameter(name="var", index=0, type_=integer, by_ref=True)],
                 None,
             ),
             ("eot", [], integer),
             (
                 "WriteChar",
-                [SYM.FormalParameter(name="c", type_=integer, by_ref=False)],
+                [SYM.FormalParameter(name="c", index=0, type_=integer, by_ref=False)],
                 None,
             ),
             (
                 "WriteInt",
                 [
-                    SYM.FormalParameter(name="n", type_=integer, by_ref=False),
-                    SYM.FormalParameter(name="w", type_=integer, by_ref=False),
+                    SYM.FormalParameter(name="n", index=0, type_=integer, by_ref=False),
+                    SYM.FormalParameter(name="w", index=1, type_=integer, by_ref=False),
                 ],
                 None,
             ),

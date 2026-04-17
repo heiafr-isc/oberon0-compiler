@@ -10,6 +10,7 @@ from dataclasses import dataclass
 
 from . import sym_table as SYM
 from .scanner import Position, Scanner
+from .token import Token
 
 actual_scanner: Scanner | None = None
 
@@ -79,6 +80,7 @@ class StatementSequence(Node):
 @dataclass
 class ProcedureDeclaration(Node):
     symbol: SYM.ProcedureDefinition
+    exported: bool
     declarations: Declarations
     body: StatementSequence
 
@@ -178,7 +180,7 @@ class Factor(Node):
 @dataclass
 class Term(Node):
     factor: Factor
-    mulop_factors: list[tuple[str, Factor]]
+    mulop_factors: list[tuple[Token, Factor]]
 
     def __str__(self) -> str:
         mulop = "".join(f" {op} {f}" for op, f in self.mulop_factors)
@@ -198,7 +200,7 @@ class FunctionCall(Factor):
 class SimpleExpression(Expression):
     sign: str | None
     term: Term
-    addop_terms: list[tuple[str, Term]]
+    addop_terms: list[tuple[Token, Term]]
 
     def __str__(self) -> str:
         addop = "".join(f" {op} {t}" for op, t in self.addop_terms)

@@ -141,7 +141,7 @@ class Parser:
         f = self.factor()
         m = []
         while self.scanner.token in [Token.TIMES, Token.DIV, Token.MOD, Token.AND]:
-            op = self.scanner.value
+            op = self.scanner.token
             self.scanner.get_next_token()
             m.append((op, self.factor()))
         return ast.Term(position=self.scanner.position(), factor=f, mulop_factors=m)
@@ -158,7 +158,7 @@ class Parser:
             t = self.term()
             a = []
             while self.scanner.token in [Token.PLUS, Token.MINUS, Token.OR]:
-                op = self.scanner.value
+                op = self.scanner.token
                 self.scanner.get_next_token()
                 a.append((op, self.term()))
             return ast.SimpleExpression(
@@ -391,8 +391,10 @@ class Parser:
                 self.scanner.get_next_token()
                 type_ = self.sym_table.type_(self.scanner.value)
                 res = []
-                for index, i in enumerate(fp_idents):
-                    sym = SYM.FormalParameter(name=i, type_=type_, by_ref=by_ref)
+                for idx, i in enumerate(fp_idents):
+                    sym = SYM.FormalParameter(
+                        name=i, type_=type_, index=idx, by_ref=by_ref
+                    )
                     self.sym_table.add(sym)
                     res.append(sym)
 
@@ -472,6 +474,7 @@ class Parser:
                     ast.ProcedureDeclaration(
                         position=self.scanner.position(),
                         symbol=sym,
+                        exported=exported,
                         declarations=decl,
                         body=body,
                     )

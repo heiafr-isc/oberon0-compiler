@@ -8,7 +8,6 @@ Oberon-0 scanner
 
 import io
 from dataclasses import dataclass
-from enum import Enum
 from pathlib import Path
 
 from loguru import logger
@@ -39,7 +38,7 @@ class ScannerError(Exception):
 @dataclass
 class Scanner:
     eof: bool = False
-    token: Enum | None = None  # Next Token
+    token: Token | None = None  # Next Token
     value: str = ""
     file_name: Path | None = None
     line_no: int = 0
@@ -110,7 +109,7 @@ class Scanner:
 
     def get_next_token(self) -> None:  # noqa: C901
 
-        def special_char_token() -> tuple[Enum, str]:
+        def special_char_token() -> tuple[Token, str]:
             prev_token = None
             prev_value = None
             value = ""
